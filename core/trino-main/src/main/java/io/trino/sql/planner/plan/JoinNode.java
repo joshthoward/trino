@@ -355,6 +355,11 @@ public class JoinNode
         return new JoinNode(getId(), type, left, right, criteria, leftOutputSymbols, rightOutputSymbols, maySkipOutputDuplicates, filter, leftHashSymbol, rightHashSymbol, distributionType, spillable, dynamicFilters, Optional.of(statsAndCost));
     }
 
+    public JoinNode withFilter(Expression filter)
+    {
+        return new JoinNode(getId(), type, left, right, criteria, leftOutputSymbols, rightOutputSymbols, maySkipOutputDuplicates, Optional.of(filter), leftHashSymbol, rightHashSymbol, distributionType, spillable, dynamicFilters, reorderJoinStatsAndCost);
+    }
+
     public boolean isCrossJoin()
     {
         return criteria.isEmpty() && filter.isEmpty() && type == INNER;

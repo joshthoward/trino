@@ -135,6 +135,8 @@ public class FeaturesConfig
     private boolean useTableScanNodePartitioning = true;
     private double tableScanNodePartitioningMinBucketToTaskRatio = 0.5;
     private boolean mergeProjectWithValues = true;
+    private boolean optimizeNullsInJoin = true;
+    private double optimizeNullsInJoinThreshold = 0.5;
 
     private Duration iterativeOptimizerTimeout = new Duration(3, MINUTES); // by default let optimizer wait a long time in case it retrieves some data from ConnectorMetadata
     private DataSize filterAndProjectMinOutputPageSize = DataSize.of(500, KILOBYTE);
@@ -1086,6 +1088,30 @@ public class FeaturesConfig
     public FeaturesConfig setMergeProjectWithValues(boolean mergeProjectWithValues)
     {
         this.mergeProjectWithValues = mergeProjectWithValues;
+        return this;
+    }
+
+    public boolean isOptimizeNullsInJoin()
+    {
+        return optimizeNullsInJoin;
+    }
+
+    @Config("optimizer.optimize-nulls-in-join")
+    public FeaturesConfig setOptimizeNullsInJoin(boolean optimizeNullsInJoin)
+    {
+        this.optimizeNullsInJoin = optimizeNullsInJoin;
+        return this;
+    }
+
+    public double getOptimizeNullsInJoinThreshold()
+    {
+        return optimizeNullsInJoinThreshold;
+    }
+
+    @Config("optimizer.optimize-nulls-in-join-threshold")
+    public FeaturesConfig setOptimizeNullsInJoinThreshold(double optimizeNullsInJoinThreshold)
+    {
+        this.optimizeNullsInJoinThreshold = optimizeNullsInJoinThreshold;
         return this;
     }
 }

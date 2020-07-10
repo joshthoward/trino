@@ -139,6 +139,8 @@ public final class SystemSessionProperties
     public static final String USE_LEGACY_WINDOW_FILTER_PUSHDOWN = "use_legacy_window_filter_pushdown";
     public static final String MAX_UNACKNOWLEDGED_SPLITS_PER_TASK = "max_unacknowledged_splits_per_task";
     public static final String MERGE_PROJECT_WITH_VALUES = "merge_project_with_values";
+    public static final String OPTIMIZED_NULLS_IN_JOIN = "optimize_nulls_in_join";
+    public static final String OPTIMIZED_NULLS_IN_JOIN_THRESHOLD = "optimize_nulls_in_join_threshold";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -641,6 +643,16 @@ public final class SystemSessionProperties
                         MERGE_PROJECT_WITH_VALUES,
                         "Inline project expressions into values",
                         featuresConfig.isMergeProjectWithValues(),
+                        false),
+                booleanProperty(
+                        OPTIMIZED_NULLS_IN_JOIN,
+                        "When true, the optimizer would infer not-null predicates for join keys through join",
+                        featuresConfig.isOptimizeNullsInJoin(),
+                        false),
+                    doubleProperty(
+                        OPTIMIZED_NULLS_IN_JOIN_THRESHOLD,
+                        "A join key would be inferred only when the nulls fraction is greater than or equal to the threshold. 'optimize_nulls_in_join' must be enabled. Default 0.5",
+                        featuresConfig.getOptimizeNullsInJoinThreshold(),
                         false));
     }
 
@@ -1142,5 +1154,15 @@ public final class SystemSessionProperties
     public static boolean isMergeProjectWithValues(Session session)
     {
         return session.getSystemProperty(MERGE_PROJECT_WITH_VALUES, Boolean.class);
+    }
+
+    public static boolean isOptimizeNullsInJoin(Session session)
+    {
+        return session.getSystemProperty(OPTIMIZED_NULLS_IN_JOIN, Boolean.class);
+    }
+
+    public static Double getOptimizeNullsThreshold(Session session)
+    {
+        return session.getSystemProperty(OPTIMIZED_NULLS_IN_JOIN_THRESHOLD, Double.class);
     }
 }

@@ -33,6 +33,7 @@ import io.trino.sql.SqlPath;
 import java.util.Optional;
 
 import static io.trino.SystemSessionProperties.IGNORE_STATS_CALCULATOR_FAILURES;
+import static io.trino.SystemSessionProperties.OPTIMIZED_NULLS_IN_JOIN;
 import static io.trino.connector.CatalogName.createInformationSchemaCatalogName;
 import static io.trino.connector.CatalogName.createSystemTablesCatalogName;
 import static java.util.Locale.ENGLISH;
@@ -72,7 +73,8 @@ public final class TestingSession
                 .setLocale(ENGLISH)
                 .setSystemProperty(IGNORE_STATS_CALCULATOR_FAILURES, "false")
                 .setRemoteUserAddress("address")
-                .setUserAgent("agent");
+                .setUserAgent("agent")
+                .setSystemProperty(OPTIMIZED_NULLS_IN_JOIN, "false");
     }
 
     public static Catalog createBogusTestingCatalog(String catalogName)
