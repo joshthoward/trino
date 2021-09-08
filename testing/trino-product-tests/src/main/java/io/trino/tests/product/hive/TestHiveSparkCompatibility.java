@@ -14,6 +14,7 @@
 package io.trino.tests.product.hive;
 
 import io.trino.tempto.ProductTest;
+import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.util.List;
@@ -35,8 +36,14 @@ public class TestHiveSparkCompatibility
     // see spark-defaults.conf
     private static final String TRINO_CATALOG = "hive";
 
-    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
-    public void testTrinoReadingTableCreatedByNativeSpark()
+    @DataProvider
+    public Object[][] tableFormat()
+    {
+        return new Object[][] {{"ORC"}, {"PARQUET"}};
+    }
+
+    @Test(dataProvider = "tableFormat", groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testTrinoReadingTableCreatedByNativeSpark(String tableFormat)
     {
         // Spark tables can be created using native Spark code or by going through Hive code
         // This tests the native Spark path.
@@ -51,27 +58,26 @@ public class TestHiveSparkCompatibility
                         "  `a_real` FLOAT, " +
                         "  `a_double` DOUBLE, " +
                         "  `a_boolean` BOOLEAN) " +
-                        "USING ORC " +
+                        "USING %s " +
                         "CLUSTERED BY (a_string) " +
                         "INTO 4 BUCKETS " +
                         // Hive requires "original" files of transactional tables to conform to the bucketed tables naming pattern
                         // We can disable transactions or add another pattern to BackgroundHiveSplitLoader
                         "TBLPROPERTIES ('transactional'='false')",
-                sparkTableName));
+                sparkTableName, tableFormat));
 
-        onSpark().executeQuery(format(
-                "INSERT INTO %s VALUES " +
-                        "('one', 1000000000000000, 1000000000, 10000000.123, 100000000000.123, true)" +
+        onSpark().executeQuery(format("INSERT INTO %s VALUES " +
+                        "('one', -2000000000000000, 1000000000, 10000000.123, 100000000000.123, true)" +
                         ", ('two', -1000000000000000, -1000000000, -10000000.123, -100000000000.123, false)" +
-                        ", ('three', 2000000000000000, 2000000000, 20000000.123, 200000000000.123, true)" +
-                        ", ('four', -2000000000000000, -2000000000, -20000000.123, -200000000000.123, false)",
+                        ", ('three', 1000000000000000, 2000000000, 20000000.123, 200000000000.123, true)" +
+                        ", ('four', 2000000000000000, -2000000000, -20000000.123, -200000000000.123, false)",
                 sparkTableName));
 
         List<Row> expected = List.of(
-                row("one", 1000000000000000L, 1000000000, 10000000.123F, 100000000000.123, true),
+                row("one", -2000000000000000L, 1000000000, 10000000.123F, 100000000000.123, true),
                 row("two", -1000000000000000L, -1000000000, -10000000.123F, -100000000000.123, false),
-                row("three", 2000000000000000L, 2000000000, 20000000.123F, 200000000000.123, true),
-                row("four", -2000000000000000L, -2000000000, -20000000.123F, -200000000000.123, false));
+                row("three", 1000000000000000L, 2000000000, 20000000.123F, 200000000000.123, true),
+                row("four", 2000000000000000L, -2000000000, -20000000.123F, -200000000000.123, false));
         assertThat(onSpark().executeQuery("SELECT a_string, a_bigint, an_integer, a_real, a_double, a_boolean FROM " + sparkTableName))
                 .containsOnly(expected);
         assertThat(onTrino().executeQuery("SELECT a_string, a_bigint, an_integer, a_real, a_double, a_boolean FROM " + trinoTableName))
@@ -88,13 +94,65 @@ public class TestHiveSparkCompatibility
                                 "   a_boolean boolean\n" +
                                 ")\n" +
                                 "WITH (\n" +
-                                "   format = 'ORC'\n" +
+                                "   format = '%s'\n" +
                                 ")",
-                        trinoTableName)));
+                        trinoTableName, tableFormat)));
 
         assertQueryFailure(() -> onTrino().executeQuery("SELECT a_string, a_bigint, an_integer, a_real, a_double, a_boolean, \"$bucket\" FROM " + trinoTableName))
                 .hasMessageContaining("Column '$bucket' cannot be resolved");
 
         onSpark().executeQuery("DROP TABLE " + sparkTableName);
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkReadingOrcTableCreatedByNativeTrino()
+    {
+        testSparkReadingTableCreatedByNativeTrino("ORC");
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkReadingParquetTableCreatedByNativeTrino()
+    {
+        onTrino().executeQuery("SET SESSION hive.experimental_parquet_optimized_writer_enabled = true");
+        testSparkReadingTableCreatedByNativeTrino("PARQUET");
+    }
+
+    private void testSparkReadingTableCreatedByNativeTrino(String tableFormat)
+    {
+        String sparkTableName = "test_spark_reading_trino_native_buckets_" + randomTableSuffix();
+        String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
+
+        onTrino().executeQuery(format(
+                "CREATE TABLE %s ( " +
+                        "   a_string varchar, " +
+                        "   a_bigint bigint, " +
+                        "   an_integer integer, " +
+                        "   a_real real, " +
+                        "   a_double double, " +
+                        "   a_boolean boolean " +
+                        ") " +
+                        "WITH ( " +
+                        "   format = '%s' " +
+                        ")",
+                trinoTableName, tableFormat));
+
+        onTrino().executeQuery(format("INSERT INTO %s VALUES " +
+                        "('one', -2000000000000000, 1000000000, 10000000.123, 100000000000.123, true)" +
+                        ", ('two', -1000000000000000, -1000000000, -10000000.123, -100000000000.123, false)" +
+                        ", ('three', 1000000000000000, 2000000000, 20000000.123, 200000000000.123, true)" +
+                        ", ('four', 2000000000000000, -2000000000, -20000000.123, -200000000000.123, false)",
+                trinoTableName));
+
+        List<Row> expected = List.of(
+                row("one", -2000000000000000L, 1000000000, 10000000.123F, 100000000000.123, true),
+                row("two", -1000000000000000L, -1000000000, -10000000.123F, -100000000000.123, false),
+                row("three", 1000000000000000L, 2000000000, 20000000.123F, 200000000000.123, true),
+                row("four", 2000000000000000L, -2000000000, -20000000.123F, -200000000000.123, false));
+        assertThat(onTrino().executeQuery("SELECT a_string, a_bigint, an_integer, a_real, a_double, a_boolean FROM " + trinoTableName))
+                .containsOnly(expected);
+        assertThat(onSpark().executeQuery("SELECT a_string, a_bigint, an_integer, a_real, a_double, a_boolean FROM " + sparkTableName))
+                .containsOnly(expected);
+
+        onTrino().executeQuery("DROP TABLE " + trinoTableName);
     }
 }

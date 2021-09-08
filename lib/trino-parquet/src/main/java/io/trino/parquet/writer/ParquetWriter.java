@@ -49,6 +49,7 @@ import static java.lang.Math.min;
 import static java.lang.Math.toIntExact;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.util.Objects.requireNonNull;
+import static org.apache.parquet.Version.FULL_VERSION;
 import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_2_0;
 
 public class ParquetWriter
@@ -240,6 +241,7 @@ public class ParquetWriter
     {
         FileMetaData fileMetaData = new FileMetaData();
         fileMetaData.setVersion(1);
+        fileMetaData.setCreated_by(FULL_VERSION);
         fileMetaData.setSchema(MessageTypeConverter.toParquetSchema(messageType));
         long totalRows = rowGroups.stream().mapToLong(RowGroup::getNum_rows).sum();
         fileMetaData.setNum_rows(totalRows);

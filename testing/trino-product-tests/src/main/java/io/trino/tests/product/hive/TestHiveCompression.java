@@ -33,7 +33,7 @@ import static io.trino.tests.product.utils.QueryExecutors.onHive;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 public class TestHiveCompression
         extends ProductTest
@@ -92,12 +92,11 @@ public class TestHiveCompression
     @Test(groups = HIVE_COMPRESSION)
     public void testSnappyCompressedParquetTableCreatedInTrinoWithNativeWriter()
     {
-        // TODO (https://github.com/trinodb/trino/issues/6377) Parquet files written by native Parquet writer cannot be read by Hive
+        // TODO (https://github.com/trinodb/trino/issues/7953) Native Parquet Writer writes Parquet V2 files that are not yet adopted by other engines
         assertThatThrownBy(() -> testSnappyCompressedParquetTableCreatedInTrino(true))
-                .hasStackTraceContaining("at org.apache.hive.jdbc.HiveQueryResultSet.next") // comes via Hive JDBC
+                .hasStackTraceContaining("at org.apache.hive.jdbc.Utils.verifySuccess") // comes via Hive JDBC
                 .extracting(Throwable::toString, InstanceOfAssertFactories.STRING)
-                // CDH5's Parquet uses parquet.* packages, while e.g. HDP 3.1's uses org.apache.parquet.* packages.
-                .matches("\\Qio.trino.tempto.query.QueryExecutionException: java.sql.SQLException: java.io.IOException:\\E (org.apache.)?\\Qparquet.io.ParquetDecodingException: Cannot read data due to PARQUET-246: to read safely, set parquet.split.files to false");
+                .matches("io.trino.tempto.query.QueryExecutionException: java.sql.SQLException: java.io.IOException: org.apache.hadoop.hive.ql.metadata.HiveException: java.lang.ClassCastException: org.apache.hadoop.io.BytesWritable cannot be cast to org.apache.hadoop.hive.serde2.io.HiveVarcharWritable");
     }
 
     private void testSnappyCompressedParquetTableCreatedInTrino(boolean optimizedParquetWriter)
