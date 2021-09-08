@@ -17,7 +17,6 @@ import io.trino.tempto.ProductTest;
 import io.trino.tempto.Requirement;
 import io.trino.tempto.RequirementsProvider;
 import io.trino.tempto.configuration.Configuration;
-import org.assertj.core.api.InstanceOfAssertFactories;
 import org.intellij.lang.annotations.Language;
 import org.testng.annotations.Test;
 
@@ -33,7 +32,6 @@ import static io.trino.tests.product.utils.QueryExecutors.onHive;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 public class TestHiveCompression
         extends ProductTest
@@ -92,11 +90,7 @@ public class TestHiveCompression
     @Test(groups = HIVE_COMPRESSION)
     public void testSnappyCompressedParquetTableCreatedInTrinoWithNativeWriter()
     {
-        // TODO (https://github.com/trinodb/trino/issues/7953) Native Parquet Writer writes Parquet V2 files that are not yet adopted by other engines
-        assertThatThrownBy(() -> testSnappyCompressedParquetTableCreatedInTrino(true))
-                .hasStackTraceContaining("at org.apache.hive.jdbc.Utils.verifySuccess") // comes via Hive JDBC
-                .extracting(Throwable::toString, InstanceOfAssertFactories.STRING)
-                .matches("io.trino.tempto.query.QueryExecutionException: java.sql.SQLException: java.io.IOException: org.apache.hadoop.hive.ql.metadata.HiveException: java.lang.ClassCastException: org.apache.hadoop.io.BytesWritable cannot be cast to org.apache.hadoop.hive.serde2.io.HiveVarcharWritable");
+        testSnappyCompressedParquetTableCreatedInTrino(true);
     }
 
     private void testSnappyCompressedParquetTableCreatedInTrino(boolean optimizedParquetWriter)

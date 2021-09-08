@@ -117,7 +117,8 @@ public class TestHiveSparkCompatibility
         testSparkReadingTableCreatedByNativeTrino("PARQUET");
     }
 
-    private void testSparkReadingTableCreatedByNativeTrino(String tableFormat)
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkReadingTableCreatedByNativeTrino(String tableFormat)
     {
         String sparkTableName = "test_spark_reading_trino_native_buckets_" + randomTableSuffix();
         String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
