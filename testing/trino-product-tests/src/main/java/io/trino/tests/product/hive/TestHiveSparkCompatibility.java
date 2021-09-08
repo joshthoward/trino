@@ -14,6 +14,7 @@
 package io.trino.tests.product.hive;
 
 import io.trino.tempto.ProductTest;
+import org.apache.parquet.column.ParquetProperties;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -29,6 +30,8 @@ import static io.trino.tests.product.hive.util.TemporaryHiveTable.randomTableSuf
 import static io.trino.tests.product.utils.QueryExecutors.onSpark;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
+import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_1_0;
+import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_2_0;
 
 public class TestHiveSparkCompatibility
         extends ProductTest
@@ -110,15 +113,21 @@ public class TestHiveSparkCompatibility
         testSparkReadingTableCreatedByNativeTrino("ORC");
     }
 
-    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
-    public void testSparkReadingParquetTableCreatedByNativeTrino()
+    @DataProvider
+    public Object[][] parquetWriterVersion()
+    {
+        return new Object[][] {{PARQUET_1_0}, {PARQUET_2_0}};
+    }
+
+    @Test(dataProvider = "parquetWriterVersion", groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkReadingParquetTableCreatedByNativeTrino(ParquetProperties.WriterVersion parquetWriterVersion)
     {
         onTrino().executeQuery("SET SESSION hive.experimental_parquet_optimized_writer_enabled = true");
+        onTrino().executeQuery(format("SET SESSION hive.parquet_writer_version = '%s'", parquetWriterVersion));
         testSparkReadingTableCreatedByNativeTrino("PARQUET");
     }
 
-    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
-    public void testSparkReadingTableCreatedByNativeTrino(String tableFormat)
+    private void testSparkReadingTableCreatedByNativeTrino(String tableFormat)
     {
         String sparkTableName = "test_spark_reading_trino_native_buckets_" + randomTableSuffix();
         String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);

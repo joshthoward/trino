@@ -14,6 +14,8 @@
 package io.trino.parquet.writer;
 
 import io.airlift.units.DataSize;
+import org.apache.parquet.column.ParquetProperties;
+import org.apache.parquet.column.ParquetProperties.WriterVersion;
 import org.apache.parquet.hadoop.ParquetWriter;
 
 import static java.lang.Math.toIntExact;
@@ -23,19 +25,22 @@ public class ParquetWriterOptions
 {
     private static final DataSize DEFAULT_MAX_ROW_GROUP_SIZE = DataSize.ofBytes(ParquetWriter.DEFAULT_BLOCK_SIZE);
     private static final DataSize DEFAULT_MAX_PAGE_SIZE = DataSize.ofBytes(ParquetWriter.DEFAULT_PAGE_SIZE);
+    private static final WriterVersion DEFAULT_WRITER_VERSION = WriterVersion.PARQUET_1_0;
 
-    public static ParquetWriterOptions.Builder builder()
+    public static Builder builder()
     {
-        return new ParquetWriterOptions.Builder();
+        return new Builder();
     }
 
     private final int maxRowGroupSize;
     private final int maxPageSize;
+    private final WriterVersion writerVersion;
 
-    private ParquetWriterOptions(DataSize maxBlockSize, DataSize maxPageSize)
+    private ParquetWriterOptions(DataSize maxBlockSize, DataSize maxPageSize, WriterVersion writerVersion)
     {
         this.maxRowGroupSize = toIntExact(requireNonNull(maxBlockSize, "maxBlockSize is null").toBytes());
         this.maxPageSize = toIntExact(requireNonNull(maxPageSize, "maxPageSize is null").toBytes());
+        this.writerVersion = requireNonNull(writerVersion, "writerVersion is null");
     }
 
     public long getMaxRowGroupSize()
@@ -48,10 +53,16 @@ public class ParquetWriterOptions
         return maxPageSize;
     }
 
+    public ParquetProperties.WriterVersion getWriterVersion()
+    {
+        return writerVersion;
+    }
+
     public static class Builder
     {
         private DataSize maxBlockSize = DEFAULT_MAX_ROW_GROUP_SIZE;
         private DataSize maxPageSize = DEFAULT_MAX_PAGE_SIZE;
+        private WriterVersion writerVersion = DEFAULT_WRITER_VERSION;
 
         public Builder setMaxBlockSize(DataSize maxBlockSize)
         {
@@ -65,9 +76,15 @@ public class ParquetWriterOptions
             return this;
         }
 
+        public Builder setWriterVersion(WriterVersion writerVersion)
+        {
+            this.writerVersion = writerVersion;
+            return this;
+        }
+
         public ParquetWriterOptions build()
         {
-            return new ParquetWriterOptions(maxBlockSize, maxPageSize);
+            return new ParquetWriterOptions(maxBlockSize, maxPageSize, writerVersion);
         }
     }
 }

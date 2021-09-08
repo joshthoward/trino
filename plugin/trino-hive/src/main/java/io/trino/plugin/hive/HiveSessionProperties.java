@@ -25,6 +25,7 @@ import io.trino.plugin.hive.parquet.ParquetWriterConfig;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.session.PropertyMetadata;
+import org.apache.parquet.column.ParquetProperties;
 
 import javax.inject.Inject;
 
@@ -78,6 +79,7 @@ public final class HiveSessionProperties
     private static final String PARQUET_IGNORE_STATISTICS = "parquet_ignore_statistics";
     private static final String PARQUET_MAX_READ_BLOCK_SIZE = "parquet_max_read_block_size";
     private static final String PARQUET_WRITER_BLOCK_SIZE = "parquet_writer_block_size";
+    private static final String PARQUET_WRITER_VERSION = "parquet_writer_version";
     private static final String PARQUET_WRITER_PAGE_SIZE = "parquet_writer_page_size";
     private static final String MAX_SPLIT_SIZE = "max_split_size";
     private static final String MAX_INITIAL_SPLIT_SIZE = "max_initial_split_size";
@@ -306,6 +308,12 @@ public final class HiveSessionProperties
                         PARQUET_WRITER_BLOCK_SIZE,
                         "Parquet: Writer block size",
                         parquetWriterConfig.getBlockSize(),
+                        false),
+                enumProperty(
+                        PARQUET_WRITER_VERSION,
+                        "Parquet: Writer version",
+                        ParquetProperties.WriterVersion.class,
+                        ParquetProperties.WriterVersion.PARQUET_1_0,
                         false),
                 dataSizeProperty(
                         PARQUET_WRITER_PAGE_SIZE,
@@ -591,6 +599,11 @@ public final class HiveSessionProperties
     public static DataSize getParquetWriterBlockSize(ConnectorSession session)
     {
         return session.getProperty(PARQUET_WRITER_BLOCK_SIZE, DataSize.class);
+    }
+
+    public static ParquetProperties.WriterVersion getParquetWriterVersion(ConnectorSession session)
+    {
+        return session.getProperty(PARQUET_WRITER_VERSION, ParquetProperties.WriterVersion.class);
     }
 
     public static DataSize getParquetWriterPageSize(ConnectorSession session)
