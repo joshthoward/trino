@@ -22,7 +22,7 @@ import static io.trino.tempto.assertions.QueryAssert.Row;
 import static io.trino.tempto.assertions.QueryAssert.Row.row;
 import static io.trino.tempto.assertions.QueryAssert.assertQueryFailure;
 import static io.trino.tempto.assertions.QueryAssert.assertThat;
-import static io.trino.tests.product.TestGroups.HIVE_SPARK_BUCKETING;
+import static io.trino.tests.product.TestGroups.HIVE_SPARK;
 import static io.trino.tests.product.TestGroups.PROFILE_SPECIFIC_TESTS;
 import static io.trino.tests.product.hive.util.TemporaryHiveTable.randomTableSuffix;
 import static io.trino.tests.product.utils.QueryExecutors.onSpark;
@@ -35,7 +35,7 @@ public class TestHiveSparkCompatibility
     // see spark-defaults.conf
     private static final String TRINO_CATALOG = "hive";
 
-    @Test(groups = {HIVE_SPARK_BUCKETING, PROFILE_SPECIFIC_TESTS})
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
     public void testTrinoReadingTableCreatedByNativeSpark()
     {
         // Spark tables can be created using native Spark code or by going through Hive code
@@ -44,16 +44,16 @@ public class TestHiveSparkCompatibility
         String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
 
         onSpark().executeQuery(format(
-                "CREATE TABLE `default`.`%s` (\n" +
-                        "  `a_string` STRING,\n" +
-                        "  `a_bigint` BIGINT,\n" +
-                        "  `an_integer` INT,\n" +
-                        "  `a_real` FLOAT,\n" +
-                        "  `a_double` DOUBLE,\n" +
-                        "  `a_boolean` BOOLEAN)\n" +
-                        "USING ORC\n" +
-                        "CLUSTERED BY (a_string)\n" +
-                        "INTO 4 BUCKETS\n" +
+                "CREATE TABLE `default`.`%s` ( " +
+                        "  `a_string` STRING, " +
+                        "  `a_bigint` BIGINT, " +
+                        "  `an_integer` INT, " +
+                        "  `a_real` FLOAT, " +
+                        "  `a_double` DOUBLE, " +
+                        "  `a_boolean` BOOLEAN) " +
+                        "USING ORC " +
+                        "CLUSTERED BY (a_string) " +
+                        "INTO 4 BUCKETS " +
                         // Hive requires "original" files of transactional tables to conform to the bucketed tables naming pattern
                         // We can disable transactions or add another pattern to BackgroundHiveSplitLoader
                         "TBLPROPERTIES ('transactional'='false')",
