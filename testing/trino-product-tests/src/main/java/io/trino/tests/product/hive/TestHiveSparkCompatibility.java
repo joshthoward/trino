@@ -14,7 +14,7 @@
 package io.trino.tests.product.hive;
 
 import io.trino.tempto.ProductTest;
-import org.apache.parquet.column.ParquetProperties;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -32,6 +32,7 @@ import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
 import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_1_0;
 import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_2_0;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class TestHiveSparkCompatibility
         extends ProductTest
@@ -113,18 +114,24 @@ public class TestHiveSparkCompatibility
         testSparkReadingTableCreatedByNativeTrino("ORC");
     }
 
-    @DataProvider
-    public Object[][] parquetWriterVersion()
-    {
-        return new Object[][] {{PARQUET_1_0}, {PARQUET_2_0}};
-    }
-
-    @Test(dataProvider = "parquetWriterVersion", groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
-    public void testSparkReadingParquetTableCreatedByNativeTrino(ParquetProperties.WriterVersion parquetWriterVersion)
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkReadingV1ParquetTableCreatedByNativeTrino()
     {
         onTrino().executeQuery("SET SESSION hive.experimental_parquet_optimized_writer_enabled = true");
-        onTrino().executeQuery(format("SET SESSION hive.parquet_writer_version = '%s'", parquetWriterVersion));
+        onTrino().executeQuery(format("SET SESSION hive.parquet_writer_version = '%s'", PARQUET_1_0));
         testSparkReadingTableCreatedByNativeTrino("PARQUET");
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkReadingV2ParquetTableCreatedByNativeTrino()
+    {
+        onTrino().executeQuery("SET SESSION hive.experimental_parquet_optimized_writer_enabled = true");
+        onTrino().executeQuery(format("SET SESSION hive.parquet_writer_version = '%s'", PARQUET_2_0));
+        // Spark's VectorizedColumnReader cannot read Parquet V2 files
+        assertThatThrownBy(() -> testSparkReadingTableCreatedByNativeTrino("PARQUET"))
+                .hasStackTraceContaining("at org.apache.hive.jdbc.HiveStatement.execute")
+                .extracting(Throwable::toString, InstanceOfAssertFactories.STRING)
+                .matches("java.lang.UnsupportedOperationException: Unsupported encoding: DELTA_BYTE_ARRAY");
     }
 
     private void testSparkReadingTableCreatedByNativeTrino(String tableFormat)
