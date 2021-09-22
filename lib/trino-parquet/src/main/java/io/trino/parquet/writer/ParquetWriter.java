@@ -75,12 +75,15 @@ public class ParquetWriter
 
     public static final Slice MAGIC = wrappedBuffer("PAR1".getBytes(US_ASCII));
 
+    public final String createdBy;
+
     public ParquetWriter(
             OutputStream outputStream,
             MessageType messageType,
             Map<List<String>, Type> primitiveTypes,
             ParquetWriterOptions writerOption,
-            CompressionCodecName compressionCodecName)
+            CompressionCodecName compressionCodecName,
+            String trinoVersion)
     {
         this.outputStream = new OutputStreamSliceOutput(requireNonNull(outputStream, "outputstream is null"));
         this.messageType = requireNonNull(messageType, "messageType is null");
@@ -96,6 +99,7 @@ public class ParquetWriter
         this.columnWriters = ParquetWriters.getColumnWriters(messageType, primitiveTypes, parquetProperties, compressionCodecName);
 
         this.chunkMaxLogicalBytes = max(1, CHUNK_MAX_BYTES / 2);
+        this.createdBy = "Trino version " + requireNonNull(trinoVersion, "trinoVersion is null");
     }
 
     public long getWrittenBytes()
@@ -235,11 +239,12 @@ public class ParquetWriter
         createDataOutput(MAGIC).writeData(outputStream);
     }
 
-    static Slice getFooter(List<RowGroup> rowGroups, MessageType messageType)
+    Slice getFooter(List<RowGroup> rowGroups, MessageType messageType)
             throws IOException
     {
         FileMetaData fileMetaData = new FileMetaData();
         fileMetaData.setVersion(1);
+        fileMetaData.setCreated_by(createdBy);
         fileMetaData.setSchema(MessageTypeConverter.toParquetSchema(messageType));
         long totalRows = rowGroups.stream().mapToLong(RowGroup::getNum_rows).sum();
         fileMetaData.setNum_rows(totalRows);

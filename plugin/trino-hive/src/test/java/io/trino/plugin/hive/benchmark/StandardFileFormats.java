@@ -31,6 +31,7 @@ import io.trino.plugin.hive.HiveConfig;
 import io.trino.plugin.hive.HivePageSourceFactory;
 import io.trino.plugin.hive.HiveRecordCursorProvider;
 import io.trino.plugin.hive.HiveStorageFormat;
+import io.trino.plugin.hive.NodeVersion;
 import io.trino.plugin.hive.RecordFileWriter;
 import io.trino.plugin.hive.orc.OrcPageSourceFactory;
 import io.trino.plugin.hive.parquet.ParquetPageSourceFactory;
@@ -305,7 +306,8 @@ public final class StandardFileFormats
                     schemaConverter.getMessageType(),
                     schemaConverter.getPrimitiveTypes(),
                     ParquetWriterOptions.builder().build(),
-                    compressionCodec.getParquetCompressionCodec());
+                    compressionCodec.getParquetCompressionCodec(),
+                    new NodeVersion("test-version").toString());
         }
 
         @Override

@@ -16,6 +16,7 @@ package io.trino.plugin.iceberg;
 import io.trino.parquet.writer.ParquetWriterOptions;
 import io.trino.plugin.hive.HdfsEnvironment;
 import io.trino.plugin.hive.HdfsEnvironment.HdfsContext;
+import io.trino.plugin.hive.NodeVersion;
 import io.trino.plugin.hive.parquet.ParquetFileWriter;
 import io.trino.spi.type.Type;
 import org.apache.hadoop.fs.Path;
@@ -49,6 +50,7 @@ public class IcebergParquetFileWriter
             ParquetWriterOptions parquetWriterOptions,
             int[] fileInputColumnIndexes,
             CompressionCodecName compressionCodecName,
+            NodeVersion nodeVersion,
             Path outputPath,
             HdfsEnvironment hdfsEnvironment,
             HdfsContext hdfsContext)
@@ -60,7 +62,8 @@ public class IcebergParquetFileWriter
                 primitiveTypes,
                 parquetWriterOptions,
                 fileInputColumnIndexes,
-                compressionCodecName);
+                compressionCodecName,
+                nodeVersion);
         this.outputPath = requireNonNull(outputPath, "outputPath is null");
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
         this.hdfsContext = requireNonNull(hdfsContext, "hdfsContext is null");

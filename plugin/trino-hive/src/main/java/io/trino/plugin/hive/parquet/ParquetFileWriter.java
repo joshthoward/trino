@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableList;
 import io.trino.parquet.writer.ParquetWriter;
 import io.trino.parquet.writer.ParquetWriterOptions;
 import io.trino.plugin.hive.FileWriter;
+import io.trino.plugin.hive.NodeVersion;
 import io.trino.spi.Page;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
@@ -57,16 +58,19 @@ public class ParquetFileWriter
             Map<List<String>, Type> primitiveTypes,
             ParquetWriterOptions parquetWriterOptions,
             int[] fileInputColumnIndexes,
-            CompressionCodecName compressionCodecName)
+            CompressionCodecName compressionCodecName,
+            NodeVersion nodeVersion)
     {
         requireNonNull(outputStream, "outputStream is null");
+        requireNonNull(nodeVersion, "nodeVersion is null");
 
         this.parquetWriter = new ParquetWriter(
                 outputStream,
                 messageType,
                 primitiveTypes,
                 parquetWriterOptions,
-                compressionCodecName);
+                compressionCodecName,
+                nodeVersion.toString());
 
         this.rollbackAction = requireNonNull(rollbackAction, "rollbackAction is null");
         this.fileInputColumnIndexes = requireNonNull(fileInputColumnIndexes, "fileInputColumnIndexes is null");
