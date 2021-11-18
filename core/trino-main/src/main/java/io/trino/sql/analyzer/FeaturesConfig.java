@@ -71,7 +71,7 @@ public class FeaturesConfig
     private boolean distributedIndexJoinsEnabled;
     private DataSize joinMaxBroadcastTableSize = DataSize.of(100, MEGABYTE);
     private JoinDistributionType joinDistributionType = JoinDistributionType.AUTOMATIC;
-    private boolean colocatedJoinsEnabled;
+    private boolean colocatedJoinsEnabled = true;
     private boolean groupedExecutionEnabled;
     private boolean dynamicScheduleForGroupedExecution;
     private int concurrentLifespansPerTask;
