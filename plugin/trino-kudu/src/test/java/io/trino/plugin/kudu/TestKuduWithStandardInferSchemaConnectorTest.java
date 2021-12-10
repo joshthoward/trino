@@ -17,18 +17,20 @@ import org.testng.annotations.Test;
 
 import java.util.Optional;
 
-public class TestKuduSmokeTestWithEmptyInferSchema
-        extends AbstractKuduIntegrationSmokeTest
+import static org.testng.Assert.assertEquals;
+
+public class TestKuduWithStandardInferSchemaConnectorTest
+        extends BaseKuduConnectorTest
 {
     @Override
     protected Optional<String> getKuduSchemaEmulationPrefix()
     {
-        return Optional.of("");
+        return Optional.of("presto::");
     }
 
     @Test
     public void testListingOfTableForDefaultSchema()
     {
-        assertQuery("SHOW TABLES FROM default", "VALUES '$schemas'");
+        assertEquals(computeActual("SHOW TABLES FROM default").getRowCount(), 0);
     }
 }
