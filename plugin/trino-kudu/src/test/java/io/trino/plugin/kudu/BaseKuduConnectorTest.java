@@ -14,9 +14,12 @@
 package io.trino.plugin.kudu;
 
 import io.trino.sql.planner.plan.LimitNode;
-import io.trino.testing.AbstractTestIntegrationSmokeTest;
+import io.trino.testing.BaseConnectorTest;
 import io.trino.testing.MaterializedResult;
 import io.trino.testing.QueryRunner;
+import io.trino.testing.TestingConnectorBehavior;
+import io.trino.testing.sql.TestTable;
+import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
@@ -26,34 +29,180 @@ import java.util.regex.Pattern;
 import static io.trino.plugin.kudu.KuduQueryRunnerFactory.createKuduQueryRunnerTpch;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.testing.MaterializedResult.resultBuilder;
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_DELETE;
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_TOPN_PUSHDOWN;
 import static io.trino.testing.assertions.Assert.assertEquals;
-import static io.trino.tpch.TpchTable.CUSTOMER;
-import static io.trino.tpch.TpchTable.NATION;
-import static io.trino.tpch.TpchTable.ORDERS;
-import static io.trino.tpch.TpchTable.REGION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.testng.Assert.assertTrue;
 
-public abstract class AbstractKuduIntegrationSmokeTest
-        // TODO extend BaseConnectorTest
-        extends AbstractTestIntegrationSmokeTest
+public abstract class BaseKuduConnectorTest
+        extends BaseConnectorTest
 {
     private TestingKuduServer kuduServer;
 
     protected abstract Optional<String> getKuduSchemaEmulationPrefix();
 
     @Override
+    protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior)
+    {
+        switch (connectorBehavior) {
+            case SUPPORTS_ARRAY:
+            case SUPPORTS_COMMENT_ON_TABLE:
+            case SUPPORTS_COMMENT_ON_COLUMN:
+            case SUPPORTS_RENAME_SCHEMA:
+            case SUPPORTS_TOPN_PUSHDOWN:
+                return false;
+            case SUPPORTS_DELETE:
+                return true;
+            default:
+                return super.hasBehavior(connectorBehavior);
+        }
+    }
+
+    @Override
     protected QueryRunner createQueryRunner()
             throws Exception
     {
         kuduServer = new TestingKuduServer();
-        return createKuduQueryRunnerTpch(kuduServer, getKuduSchemaEmulationPrefix(), CUSTOMER, NATION, ORDERS, REGION);
+        return createKuduQueryRunnerTpch(kuduServer, getKuduSchemaEmulationPrefix(), REQUIRED_TPCH_TABLES);
     }
 
     @AfterClass(alwaysRun = true)
     public final void destroy()
     {
         kuduServer.close();
+    }
+
+    @Override
+    protected TestTable createTableWithDefaultColumns()
+    {
+        throw new SkipException("Kudu connector does not support column default values");
+    }
+
+    @Override
+    public void testInsert()
+    {
+        // TODO Support these test once kudu connector can create tables with default partitions
+    }
+
+    @Override
+    public void testCommentTable()
+    {
+        // TODO
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testCommentColumn()
+    {
+        // TODO
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testAddColumn()
+    {
+        // TODO Support these test once kudu connector can create tables with default partitions
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testCreateTable()
+    {
+        // TODO Support these test once kudu connector can create tables with default partitions
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testInsertUnicode()
+    {
+        // TODO Support these test once kudu connector can create tables with default partitions
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testInsertHighestUnicodeCharacter()
+    {
+        // TODO Support these test once kudu connector can create tables with default partitions
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testDropNonEmptySchema()
+    {
+        // TODO Support these test once kudu connector can create tables with default partitions
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testDelete()
+    {
+        // TODO Support these test once kudu connector can create tables with default partitions
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    protected void skipTestUnlessSupportsDeletes()
+    {
+        // TODO Remove override once kudu connector can create tables with default partitions
+        if (hasBehavior(SUPPORTS_DELETE)) {
+            assertQueryFails("DELETE FROM region", "This connector does not support deletes");
+            throw new SkipException("This connector does not support deletes");
+        }
+    }
+
+    @Override
+    public void testShowColumns()
+    {
+        MaterializedResult actual = computeActual("SHOW COLUMNS FROM orders");
+
+        MaterializedResult expectedParametrizedVarchar = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
+                .row("orderkey", "bigint", "nullable, encoding=auto, compression=default", "")
+                .row("custkey", "bigint", "nullable, encoding=auto, compression=default", "")
+                .row("orderstatus", "varchar", "nullable, encoding=auto, compression=default", "")
+                .row("totalprice", "double", "nullable, encoding=auto, compression=default", "")
+                .row("orderdate", "varchar", "nullable, encoding=auto, compression=default", "")
+                .row("orderpriority", "varchar", "nullable, encoding=auto, compression=default", "")
+                .row("clerk", "varchar", "nullable, encoding=auto, compression=default", "")
+                .row("shippriority", "integer", "nullable, encoding=auto, compression=default", "")
+                .row("comment", "varchar", "nullable, encoding=auto, compression=default", "")
+                .build();
+
+        assertEquals(actual, expectedParametrizedVarchar);
+    }
+
+    @Override
+    @Test
+    public void testWrittenStats()
+    {
+        // TODO Kudu connector supports CTAS and inserts, but the test would fail
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    public void testColumnName(String columnName)
+    {
+        // TODO (https://github.com/trinodb/trino/issues/3477) enable the test
+        throw new SkipException("TODO");
+    }
+
+    @Override
+    protected Optional<DataMappingTestSetup> filterDataMappingSmokeTestData(DataMappingTestSetup dataMappingTestSetup)
+    {
+        String typeName = dataMappingTestSetup.getTrinoTypeName();
+        if (typeName.equals("time")
+                || typeName.equals("timestamp(3) with time zone")) {
+            return Optional.of(dataMappingTestSetup.asUnsupported());
+        }
+
+        if (typeName.equals("date") // date gets stored as varchar
+                || typeName.equals("varbinary") // TODO (https://github.com/trinodb/trino/issues/3416)
+                || (typeName.startsWith("char") && dataMappingTestSetup.getSampleValueLiteral().contains(" "))) { // TODO: https://github.com/trinodb/trino/issues/3597
+            // TODO this should either work or fail cleanly
+            return Optional.empty();
+        }
+
+        return Optional.of(dataMappingTestSetup);
     }
 
     @Test

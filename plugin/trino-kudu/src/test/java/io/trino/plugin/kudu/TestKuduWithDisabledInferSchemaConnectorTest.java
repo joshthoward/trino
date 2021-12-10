@@ -17,8 +17,8 @@ import org.testng.annotations.Test;
 
 import java.util.Optional;
 
-public class TestKuduSmokeTestWithDisabledInferSchema
-        extends AbstractKuduIntegrationSmokeTest
+public class TestKuduWithDisabledInferSchemaConnectorTest
+        extends BaseKuduConnectorTest
 {
     @Override
     protected Optional<String> getKuduSchemaEmulationPrefix()
