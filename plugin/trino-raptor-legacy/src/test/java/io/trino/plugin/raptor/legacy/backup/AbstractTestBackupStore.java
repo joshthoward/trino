@@ -17,6 +17,7 @@ import com.google.common.io.Files;
 import org.testng.annotations.Test;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.UUID;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -28,7 +29,7 @@ import static org.testng.Assert.assertTrue;
 
 public abstract class AbstractTestBackupStore<T extends BackupStore>
 {
-    protected File temporary;
+    protected Path temporary;
     protected T store;
 
     @Test
@@ -36,8 +37,8 @@ public abstract class AbstractTestBackupStore<T extends BackupStore>
             throws Exception
     {
         // backup first file
-        File file1 = new File(temporary, "file1");
-        Files.write("hello world", file1, UTF_8);
+        File file1 = temporary.resolve("file1").toFile();
+        Files.asCharSink(file1, UTF_8).write("hello world");
         UUID uuid1 = randomUUID();
 
         assertFalse(store.shardExists(uuid1));
@@ -45,8 +46,8 @@ public abstract class AbstractTestBackupStore<T extends BackupStore>
         assertTrue(store.shardExists(uuid1));
 
         // backup second file
-        File file2 = new File(temporary, "file2");
-        Files.write("bye bye", file2, UTF_8);
+        File file2 = temporary.resolve("file2").toFile();
+        Files.asCharSink(file2, UTF_8).write("bye bye");
         UUID uuid2 = randomUUID();
 
         assertFalse(store.shardExists(uuid2));
@@ -54,12 +55,12 @@ public abstract class AbstractTestBackupStore<T extends BackupStore>
         assertTrue(store.shardExists(uuid2));
 
         // verify first file
-        File restore1 = new File(temporary, "restore1");
+        File restore1 = temporary.resolve("restore1").toFile();
         store.restoreShard(uuid1, restore1);
         assertEquals(readAllBytes(file1.toPath()), readAllBytes(restore1.toPath()));
 
         // verify second file
-        File restore2 = new File(temporary, "restore2");
+        File restore2 = temporary.resolve("restore2").toFile();
         store.restoreShard(uuid2, restore2);
         assertEquals(readAllBytes(file2.toPath()), readAllBytes(restore2.toPath()));
 

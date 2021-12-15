@@ -16,6 +16,7 @@ package io.trino.plugin.raptor.legacy.storage;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+import com.google.common.io.Files;
 import io.airlift.slice.Slice;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
@@ -57,6 +58,7 @@ import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collection;
@@ -68,8 +70,6 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static com.google.common.hash.Hashing.md5;
-import static com.google.common.io.Files.createTempDir;
-import static com.google.common.io.Files.hash;
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
@@ -98,6 +98,7 @@ import static io.trino.testing.MaterializedResult.resultBuilder;
 import static io.trino.testing.TestingConnectorSession.SESSION;
 import static io.trino.testing.assertions.Assert.assertEquals;
 import static java.lang.String.format;
+import static java.nio.file.Files.createTempDirectory;
 import static org.joda.time.DateTimeZone.UTC;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotEquals;
@@ -129,7 +130,7 @@ public class TestRaptorStorageManager
 
     private final NodeManager nodeManager = new TestingNodeManager();
     private Handle dummyHandle;
-    private File temporary;
+    private Path temporary;
     private StorageService storageService;
     private ShardRecoveryManager recoveryManager;
     private FileBackupStore fileBackupStore;
@@ -138,13 +139,14 @@ public class TestRaptorStorageManager
 
     @BeforeMethod
     public void setup()
+            throws IOException
     {
-        temporary = createTempDir();
-        File directory = new File(temporary, "data");
+        temporary = createTempDirectory(null);
+        File directory = temporary.resolve("data").toFile();
         storageService = new FileStorageService(directory);
         storageService.start();
 
-        File backupDirectory = new File(temporary, "backup");
+        File backupDirectory = temporary.resolve("backup").toFile();
         fileBackupStore = new FileBackupStore(backupDirectory);
         fileBackupStore.start();
         backupStore = Optional.of(fileBackupStore);
@@ -167,7 +169,7 @@ public class TestRaptorStorageManager
         if (dummyHandle != null) {
             dummyHandle.close();
         }
-        deleteRecursively(temporary.toPath(), ALLOW_INSECURE);
+        deleteRecursively(temporary, ALLOW_INSECURE);
     }
 
     @Test
@@ -367,7 +369,7 @@ public class TestRaptorStorageManager
     public void testWriterRollback()
     {
         // verify staging directory is empty
-        File staging = new File(new File(temporary, "data"), "staging");
+        File staging = temporary.resolve("data").resolve("staging").toFile();
         assertDirectory(staging);
         assertEquals(staging.list(), new String[] {});
 
@@ -628,7 +630,7 @@ public class TestRaptorStorageManager
     private static void assertFileEquals(File actual, File expected)
             throws IOException
     {
-        assertEquals(hash(actual, md5()), hash(expected, md5()));
+        assertEquals(Files.asByteSource(actual).hash(md5()), Files.asByteSource(expected).hash(md5()));
     }
 
     private static void assertColumnStats(List<ColumnStats> list, long columnId, Object min, Object max)
