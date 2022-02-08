@@ -19,13 +19,11 @@ import io.trino.connector.CatalogName;
 import io.trino.metadata.TableHandle;
 import io.trino.plugin.tpch.TpchColumnHandle;
 import io.trino.plugin.tpch.TpchTableHandle;
-import io.trino.plugin.tpch.TpchTableLayoutHandle;
 import io.trino.plugin.tpch.TpchTransactionHandle;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.NullableValue;
 import io.trino.spi.predicate.TupleDomain;
-import io.trino.spi.type.TypeOperators;
 import io.trino.sql.planner.FunctionCallBuilder;
 import io.trino.sql.planner.iterative.rule.test.BaseRuleTest;
 import io.trino.sql.tree.ArithmeticBinaryExpression;
@@ -36,8 +34,6 @@ import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.SymbolReference;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
-
-import java.util.Optional;
 
 import static io.trino.spi.predicate.Domain.singleValue;
 import static io.trino.spi.type.BigintType.BIGINT;
@@ -59,21 +55,19 @@ public class TestRemoveRedundantTableScanPredicate
     @BeforeClass
     public void setUpBeforeClass()
     {
-        removeRedundantTableScanPredicate = new RemoveRedundantTableScanPredicate(tester().getMetadata(), new TypeOperators(), tester().getTypeAnalyzer());
+        removeRedundantTableScanPredicate = new RemoveRedundantTableScanPredicate(tester().getPlannerContext(), tester().getTypeAnalyzer());
         CatalogName catalogName = tester().getCurrentConnectorId();
         TpchTableHandle nation = new TpchTableHandle("sf1", "nation", 1.0);
         nationTableHandle = new TableHandle(
                 catalogName,
                 nation,
-                TpchTransactionHandle.INSTANCE,
-                Optional.of(new TpchTableLayoutHandle(nation, TupleDomain.all())));
+                TpchTransactionHandle.INSTANCE);
 
         TpchTableHandle orders = new TpchTableHandle("sf1", "orders", 1.0);
         ordersTableHandle = new TableHandle(
                 catalogName,
                 orders,
-                TpchTransactionHandle.INSTANCE,
-                Optional.of(new TpchTableLayoutHandle(orders, TupleDomain.all())));
+                TpchTransactionHandle.INSTANCE);
     }
 
     @Test

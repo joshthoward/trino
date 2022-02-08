@@ -63,8 +63,8 @@ import static io.trino.plugin.jdbc.StandardColumnMappings.bigintWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.booleanColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.booleanWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.charWriteFunction;
-import static io.trino.plugin.jdbc.StandardColumnMappings.dateColumnMapping;
-import static io.trino.plugin.jdbc.StandardColumnMappings.dateWriteFunction;
+import static io.trino.plugin.jdbc.StandardColumnMappings.dateColumnMappingUsingSqlDate;
+import static io.trino.plugin.jdbc.StandardColumnMappings.dateWriteFunctionUsingSqlDate;
 import static io.trino.plugin.jdbc.StandardColumnMappings.decimalColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.defaultCharColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.defaultVarcharColumnMapping;
@@ -241,7 +241,7 @@ public class DruidJdbcClient
                 return Optional.of(varbinaryColumnMapping());
 
             case Types.DATE:
-                return Optional.of(dateColumnMapping());
+                return Optional.of(dateColumnMappingUsingSqlDate());
 
             case Types.TIME:
                 // TODO Consider using `StandardColumnMappings.timeColumnMapping`
@@ -400,6 +400,12 @@ public class DruidJdbcClient
         throw new TrinoException(NOT_SUPPORTED, "This connector does not support dropping schemas");
     }
 
+    @Override
+    public void renameSchema(ConnectorSession session, String schemaName, String newSchemaName)
+    {
+        throw new TrinoException(NOT_SUPPORTED, "This connector does not support renaming schemas");
+    }
+
     private WriteMapping legacyToWriteMapping(Type type)
     {
         // TODO (https://github.com/trinodb/trino/issues/497) Implement proper type mapping and add test
@@ -431,7 +437,7 @@ public class DruidJdbcClient
             if (decimalType.isShort()) {
                 return WriteMapping.longMapping(dataType, shortDecimalWriteFunction(decimalType));
             }
-            return WriteMapping.sliceMapping(dataType, longDecimalWriteFunction(decimalType));
+            return WriteMapping.objectMapping(dataType, longDecimalWriteFunction(decimalType));
         }
         if (type instanceof CharType) {
             return WriteMapping.sliceMapping("char(" + ((CharType) type).getLength() + ")", charWriteFunction());
@@ -451,7 +457,7 @@ public class DruidJdbcClient
             return WriteMapping.sliceMapping("varbinary", varbinaryWriteFunction());
         }
         if (type == DATE) {
-            return WriteMapping.longMapping("date", dateWriteFunction());
+            return WriteMapping.longMapping("date", dateWriteFunctionUsingSqlDate());
         }
         throw new TrinoException(NOT_SUPPORTED, "Unsupported column type: " + type.getDisplayName());
     }

@@ -64,6 +64,8 @@ public class HiveConfig
 {
     private static final Splitter SPLITTER = Splitter.on(',').trimResults().omitEmptyStrings();
 
+    private boolean singleStatementWritesOnly;
+
     private DataSize maxSplitSize = DataSize.of(64, MEGABYTE);
     private int maxPartitionsPerScan = 100_000;
     private int maxOutstandingSplits = 1_000;
@@ -93,6 +95,10 @@ public class HiveConfig
     private boolean immutablePartitions;
     private Optional<InsertExistingPartitionsBehavior> insertExistingPartitionsBehavior = Optional.empty();
     private boolean createEmptyBucketFiles;
+    // This is meant to protect users who are misusing schema locations (by
+    // putting schemas in locations with extraneous files), so default to false
+    // to avoid deleting those files if Trino is unable to check.
+    private boolean deleteSchemaLocationsFallback;
     private int maxPartitionsPerWriter = 100;
     private int maxOpenSortFiles = 50;
     private int writeValidationThreads = 16;
@@ -159,6 +165,19 @@ public class HiveConfig
 
     private boolean sizeBasedSplitWeightsEnabled = true;
     private double minimumAssignedSplitWeight = 0.05;
+
+    public boolean isSingleStatementWritesOnly()
+    {
+        return singleStatementWritesOnly;
+    }
+
+    @Config("hive.single-statement-writes")
+    @ConfigDescription("Require transaction to be in auto-commit mode for writes")
+    public HiveConfig setSingleStatementWritesOnly(boolean singleStatementWritesOnly)
+    {
+        this.singleStatementWritesOnly = singleStatementWritesOnly;
+        return this;
+    }
 
     public int getMaxInitialSplits()
     {
@@ -519,6 +538,19 @@ public class HiveConfig
     public HiveConfig setCreateEmptyBucketFiles(boolean createEmptyBucketFiles)
     {
         this.createEmptyBucketFiles = createEmptyBucketFiles;
+        return this;
+    }
+
+    public boolean isDeleteSchemaLocationsFallback()
+    {
+        return this.deleteSchemaLocationsFallback;
+    }
+
+    @Config("hive.delete-schema-locations-fallback")
+    @ConfigDescription("Whether schema locations should be deleted when Trino can't determine whether they contain external files.")
+    public HiveConfig setDeleteSchemaLocationsFallback(boolean deleteSchemaLocationsFallback)
+    {
+        this.deleteSchemaLocationsFallback = deleteSchemaLocationsFallback;
         return this;
     }
 

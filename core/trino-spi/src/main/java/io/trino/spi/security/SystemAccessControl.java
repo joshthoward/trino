@@ -39,6 +39,8 @@ import static io.trino.spi.security.AccessDeniedException.denyCreateTable;
 import static io.trino.spi.security.AccessDeniedException.denyCreateView;
 import static io.trino.spi.security.AccessDeniedException.denyCreateViewWithSelect;
 import static io.trino.spi.security.AccessDeniedException.denyDeleteTable;
+import static io.trino.spi.security.AccessDeniedException.denyDenySchemaPrivilege;
+import static io.trino.spi.security.AccessDeniedException.denyDenyTablePrivilege;
 import static io.trino.spi.security.AccessDeniedException.denyDropColumn;
 import static io.trino.spi.security.AccessDeniedException.denyDropMaterializedView;
 import static io.trino.spi.security.AccessDeniedException.denyDropRole;
@@ -66,6 +68,7 @@ import static io.trino.spi.security.AccessDeniedException.denyRevokeSchemaPrivil
 import static io.trino.spi.security.AccessDeniedException.denyRevokeTablePrivilege;
 import static io.trino.spi.security.AccessDeniedException.denySelectColumns;
 import static io.trino.spi.security.AccessDeniedException.denySetCatalogSessionProperty;
+import static io.trino.spi.security.AccessDeniedException.denySetMaterializedViewProperties;
 import static io.trino.spi.security.AccessDeniedException.denySetSchemaAuthorization;
 import static io.trino.spi.security.AccessDeniedException.denySetSystemSessionProperty;
 import static io.trino.spi.security.AccessDeniedException.denySetTableAuthorization;
@@ -330,18 +333,6 @@ public interface SystemAccessControl
     }
 
     /**
-     * Check if identity is allowed to create the specified table in a catalog.
-     *
-     * @throws AccessDeniedException if not allowed
-     * @deprecated use {@link #checkCanCreateTable(SystemSecurityContext context, CatalogSchemaTableName table, Map properties)} instead
-     */
-    @Deprecated
-    default void checkCanCreateTable(SystemSecurityContext context, CatalogSchemaTableName table)
-    {
-        denyCreateTable(table.toString());
-    }
-
-    /**
      * Check if identity is allowed to create the specified table with properties in a catalog.
      *
      * @throws AccessDeniedException if not allowed
@@ -376,7 +367,7 @@ public interface SystemAccessControl
      *
      * @throws AccessDeniedException if not allowed
      */
-    default void checkCanSetTableProperties(SystemSecurityContext context, CatalogSchemaTableName table, Map<String, Object> properties)
+    default void checkCanSetTableProperties(SystemSecurityContext context, CatalogSchemaTableName table, Map<String, Optional<Object>> properties)
     {
         denySetTableProperties(table.toString());
     }
@@ -590,7 +581,7 @@ public interface SystemAccessControl
      *
      * @throws AccessDeniedException if not allowed
      */
-    default void checkCanCreateMaterializedView(SystemSecurityContext context, CatalogSchemaTableName materializedView)
+    default void checkCanCreateMaterializedView(SystemSecurityContext context, CatalogSchemaTableName materializedView, Map<String, Object> properties)
     {
         denyCreateMaterializedView(materializedView.toString());
     }
@@ -603,6 +594,16 @@ public interface SystemAccessControl
     default void checkCanRefreshMaterializedView(SystemSecurityContext context, CatalogSchemaTableName materializedView)
     {
         denyRefreshMaterializedView(materializedView.toString());
+    }
+
+    /**
+     * Check if identity is allowed to set the properties of the specified materialized view in a catalog.
+     *
+     * @throws AccessDeniedException if not allowed
+     */
+    default void checkCanSetMaterializedViewProperties(SystemSecurityContext context, CatalogSchemaTableName materializedView, Map<String, Optional<Object>> properties)
+    {
+        denySetMaterializedViewProperties(materializedView.toString());
     }
 
     /**
@@ -657,6 +658,16 @@ public interface SystemAccessControl
     }
 
     /**
+     * Check if identity is allowed to deny the specified privilege to the grantee on the specified schema.
+     *
+     * @throws AccessDeniedException if not allowed
+     */
+    default void checkCanDenySchemaPrivilege(SystemSecurityContext context, Privilege privilege, CatalogSchemaName schema, TrinoPrincipal grantee)
+    {
+        denyDenySchemaPrivilege(privilege.toString(), schema.toString());
+    }
+
+    /**
      * Check if identity is allowed to revoke the specified privilege on the specified schema from the revokee.
      *
      * @throws AccessDeniedException if not allowed
@@ -674,6 +685,16 @@ public interface SystemAccessControl
     default void checkCanGrantTablePrivilege(SystemSecurityContext context, Privilege privilege, CatalogSchemaTableName table, TrinoPrincipal grantee, boolean grantOption)
     {
         denyGrantTablePrivilege(privilege.toString(), table.toString());
+    }
+
+    /**
+     * Check if identity is allowed to deny the specified privilege to the grantee on the specified table.
+     *
+     * @throws AccessDeniedException if not allowed
+     */
+    default void checkCanDenyTablePrivilege(SystemSecurityContext context, Privilege privilege, CatalogSchemaTableName table, TrinoPrincipal grantee)
+    {
+        denyDenyTablePrivilege(privilege.toString(), table.toString());
     }
 
     /**

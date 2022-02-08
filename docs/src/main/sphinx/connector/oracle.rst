@@ -77,6 +77,8 @@ you name the property file ``sales.properties``, Trino creates a catalog named
 
 .. include:: jdbc-common-configurations.fragment
 
+.. include:: jdbc-procedures.fragment
+
 .. include:: jdbc-case-insensitive-matching.fragment
 
 .. include:: non-transactional-insert.fragment
@@ -181,7 +183,7 @@ Trino data type mapping:
     - ``VARBINARY``
     -
   * - ``DATE``
-    - ``TIMESTAMP``
+    - ``TIMESTAMP(0)``
     - See :ref:`datetime mapping`
   * - ``TIMESTAMP(p)``
     - ``TIMESTAMP``
@@ -280,8 +282,8 @@ Mapping datetime types
 Selecting a timestamp with fractional second precision (``p``) greater than 3
 truncates the fractional seconds to three digits instead of rounding it.
 
-Oracle ``DATE`` type may store hours, minutes, and seconds, so it is mapped
-to Trino ``TIMESTAMP``.
+Oracle ``DATE`` type stores hours, minutes, and seconds, so it is mapped
+to Trino ``TIMESTAMP(0)``.
 
 .. warning::
 
@@ -387,6 +389,51 @@ The connector supports pushdown for a number of operations:
 * :ref:`join-pushdown`
 * :ref:`limit-pushdown`
 * :ref:`topn-pushdown`
+
+.. _oracle-predicate-pushdown:
+
+Predicate pushdown support
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The connector does not support pushdown of any predicates on columns that use
+the ``CLOB``, ``NCLOB``, ``BLOB``, or ``RAW(n)`` Oracle database types, or Trino
+data types that :ref:`map <oracle-type-mapping>` to these Oracle database types.
+
+In the following example, the predicate is not pushed down for either query
+since ``name`` is a column of type ``VARCHAR``, which maps to ``NCLOB`` in
+Oracle:
+
+.. code-block:: sql
+
+    SHOW CREATE TABLE nation;
+
+    --             Create Table
+    ----------------------------------------
+    -- CREATE TABLE oracle.trino_test.nation (
+    --    name varchar
+    -- )
+    -- (1 row)
+
+    SELECT * FROM nation WHERE name > 'CANADA';
+    SELECT * FROM nation WHERE name = 'CANADA';
+
+In the following example, the predicate is pushed down for both queries
+since ``name`` is a column of type ``VARCHAR(25)``, which maps to
+``VARCHAR2(25)`` in Oracle:
+
+.. code-block:: sql
+
+    SHOW CREATE TABLE nation;
+
+    --             Create Table
+    ----------------------------------------
+    -- CREATE TABLE oracle.trino_test.nation (
+    --    name varchar(25)
+    -- )
+    -- (1 row)
+
+    SELECT * FROM nation WHERE name > 'CANADA';
+    SELECT * FROM nation WHERE name = 'CANADA';
 
 .. _oracle-sql-support:
 

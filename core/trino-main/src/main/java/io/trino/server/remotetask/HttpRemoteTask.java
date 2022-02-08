@@ -39,10 +39,10 @@ import io.trino.execution.NodeTaskMap.PartitionedSplitCountTracker;
 import io.trino.execution.PartitionedSplitsInfo;
 import io.trino.execution.RemoteTask;
 import io.trino.execution.ScheduledSplit;
+import io.trino.execution.SplitAssignment;
 import io.trino.execution.StateMachine.StateChangeListener;
 import io.trino.execution.TaskId;
 import io.trino.execution.TaskInfo;
-import io.trino.execution.TaskSource;
 import io.trino.execution.TaskState;
 import io.trino.execution.TaskStatus;
 import io.trino.execution.buffer.BufferInfo;
@@ -255,7 +255,7 @@ public final class HttpRemoteTask
             TaskInfo initialTask = createInitialTask(taskId, location, nodeId, bufferStates, new TaskStats(DateTime.now(), null));
 
             this.dynamicFiltersFetcher = new DynamicFiltersFetcher(
-                    this::failTask,
+                    this::fail,
                     taskId,
                     location,
                     taskStatusRefreshMaxWait,
@@ -268,7 +268,7 @@ public final class HttpRemoteTask
                     dynamicFilterService);
 
             this.taskStatusFetcher = new ContinuousTaskStatusFetcher(
-                    this::failTask,
+                    this::fail,
                     initialTask.getTaskStatus(),
                     taskStatusRefreshMaxWait,
                     taskStatusCodec,
@@ -280,7 +280,7 @@ public final class HttpRemoteTask
                     stats);
 
             this.taskInfoFetcher = new TaskInfoFetcher(
-                    this::failTask,
+                    this::fail,
                     taskStatusFetcher,
                     initialTask,
                     httpClient,
@@ -307,6 +307,7 @@ public final class HttpRemoteTask
             this.outboundDynamicFiltersCollector = new DynamicFiltersCollector(this::triggerUpdate);
             dynamicFilterService.registerDynamicFilterConsumer(
                     taskId.getQueryId(),
+                    taskId.getAttemptId(),
                     outboundDynamicFilterIds,
                     outboundDynamicFiltersCollector::updateDomains);
 
@@ -528,17 +529,17 @@ public final class HttpRemoteTask
         }
     }
 
-    private synchronized void processTaskUpdate(TaskInfo newValue, List<TaskSource> sources)
+    private synchronized void processTaskUpdate(TaskInfo newValue, List<SplitAssignment> splitAssignments)
     {
         updateTaskInfo(newValue);
 
         // remove acknowledged splits, which frees memory
-        for (TaskSource source : sources) {
-            PlanNodeId planNodeId = source.getPlanNodeId();
+        for (SplitAssignment assignment : splitAssignments) {
+            PlanNodeId planNodeId = assignment.getPlanNodeId();
             boolean isPartitionedSource = planFragment.isPartitionedSources(planNodeId);
             int removed = 0;
             long removedWeight = 0;
-            for (ScheduledSplit split : source.getSplits()) {
+            for (ScheduledSplit split : assignment.getSplits()) {
                 if (pendingSplits.remove(planNodeId, split)) {
                     if (isPartitionedSource) {
                         removed++;
@@ -546,10 +547,10 @@ public final class HttpRemoteTask
                     }
                 }
             }
-            if (source.isNoMoreSplits()) {
+            if (assignment.isNoMoreSplits()) {
                 noMoreSplits.put(planNodeId, false);
             }
-            for (Lifespan lifespan : source.getNoMoreSplitsForLifespan()) {
+            for (Lifespan lifespan : assignment.getNoMoreSplitsForLifespan()) {
                 pendingNoMoreSplitsForLifespan.remove(planNodeId, lifespan);
             }
             if (isPartitionedSource) {
@@ -577,7 +578,7 @@ public final class HttpRemoteTask
     {
         // synchronized so that needsUpdate is not cleared in sendUpdate before actual request is sent
         needsUpdate.set(true);
-        sendUpdate();
+        scheduleUpdate();
     }
 
     private synchronized void sendUpdate()
@@ -601,7 +602,7 @@ public final class HttpRemoteTask
             return;
         }
 
-        List<TaskSource> sources = getSources();
+        List<SplitAssignment> splitAssignments = getSplitAssignments();
         VersionedDynamicFilterDomains dynamicFilterDomains = outboundDynamicFiltersCollector.acknowledgeAndGetNewDomains(sentDynamicFiltersVersion);
 
         // Workers don't need the embedded JSON representation when the fragment is sent
@@ -610,7 +611,7 @@ public final class HttpRemoteTask
                 session.toSessionRepresentation(),
                 session.getIdentity().getExtraCredentials(),
                 fragment,
-                sources,
+                splitAssignments,
                 outputBuffers.get(),
                 dynamicFilterDomains.getDynamicFilterDomains());
         byte[] taskUpdateRequestJson = taskUpdateRequestCodec.toJsonBytes(updateRequest);
@@ -640,32 +641,32 @@ public final class HttpRemoteTask
 
         Futures.addCallback(
                 future,
-                new SimpleHttpResponseHandler<>(new UpdateResponseHandler(sources, dynamicFilterDomains.getVersion()), request.getUri(), stats),
+                new SimpleHttpResponseHandler<>(new UpdateResponseHandler(splitAssignments, dynamicFilterDomains.getVersion()), request.getUri(), stats),
                 executor);
     }
 
-    private synchronized List<TaskSource> getSources()
+    private synchronized List<SplitAssignment> getSplitAssignments()
     {
         return Stream.concat(planFragment.getPartitionedSourceNodes().stream(), planFragment.getRemoteSourceNodes().stream())
                 .filter(Objects::nonNull)
                 .map(PlanNode::getId)
-                .map(this::getSource)
+                .map(this::getSplitAssignment)
                 .filter(Objects::nonNull)
                 .collect(toImmutableList());
     }
 
-    private synchronized TaskSource getSource(PlanNodeId planNodeId)
+    private synchronized SplitAssignment getSplitAssignment(PlanNodeId planNodeId)
     {
         Set<ScheduledSplit> splits = pendingSplits.get(planNodeId);
         boolean pendingNoMoreSplits = Boolean.TRUE.equals(this.noMoreSplits.get(planNodeId));
         boolean noMoreSplits = this.noMoreSplits.containsKey(planNodeId);
         Set<Lifespan> noMoreSplitsForLifespan = pendingNoMoreSplitsForLifespan.get(planNodeId);
 
-        TaskSource element = null;
+        SplitAssignment assignment = null;
         if (!splits.isEmpty() || !noMoreSplitsForLifespan.isEmpty() || pendingNoMoreSplits) {
-            element = new TaskSource(planNodeId, splits, noMoreSplitsForLifespan, noMoreSplits);
+            assignment = new SplitAssignment(planNodeId, splits, noMoreSplitsForLifespan, noMoreSplits);
         }
-        return element;
+        return assignment;
     }
 
     @Override
@@ -795,7 +796,8 @@ public final class HttpRemoteTask
     /**
      * Move the task directly to the failed state if there was a failure in this task
      */
-    private void failTask(Throwable cause)
+    @Override
+    public synchronized void fail(Throwable cause)
     {
         TaskStatus taskStatus = getTaskStatus();
         if (!taskStatus.getState().isDone()) {
@@ -858,12 +860,12 @@ public final class HttpRemoteTask
     private class UpdateResponseHandler
             implements SimpleHttpResponseCallback<TaskInfo>
     {
-        private final List<TaskSource> sources;
+        private final List<SplitAssignment> splitAssignments;
         private final long currentRequestDynamicFiltersVersion;
 
-        private UpdateResponseHandler(List<TaskSource> sources, long currentRequestDynamicFiltersVersion)
+        private UpdateResponseHandler(List<SplitAssignment> splitAssignments, long currentRequestDynamicFiltersVersion)
         {
-            this.sources = ImmutableList.copyOf(requireNonNull(sources, "sources is null"));
+            this.splitAssignments = ImmutableList.copyOf(requireNonNull(splitAssignments, "splitAssignments is null"));
             this.currentRequestDynamicFiltersVersion = currentRequestDynamicFiltersVersion;
         }
 
@@ -882,7 +884,7 @@ public final class HttpRemoteTask
                     // Remove dynamic filters which were successfully sent to free up memory
                     outboundDynamicFiltersCollector.acknowledge(currentRequestDynamicFiltersVersion);
                     updateStats(currentRequestStartNanos);
-                    processTaskUpdate(value, sources);
+                    processTaskUpdate(value, splitAssignments);
                     updateErrorTracker.requestSucceeded();
                 }
                 finally {
@@ -913,11 +915,11 @@ public final class HttpRemoteTask
                     }
                 }
                 catch (Error e) {
-                    failTask(e);
+                    fail(e);
                     throw e;
                 }
                 catch (RuntimeException e) {
-                    failTask(e);
+                    fail(e);
                 }
                 finally {
                     sendUpdate();
@@ -929,7 +931,7 @@ public final class HttpRemoteTask
         public void fatal(Throwable cause)
         {
             try (SetThreadName ignored = new SetThreadName("UpdateResponseHandler-%s", taskId)) {
-                failTask(cause);
+                fail(cause);
             }
         }
 

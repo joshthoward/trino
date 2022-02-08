@@ -46,12 +46,12 @@ import java.util.concurrent.CompletableFuture;
 import static io.trino.plugin.hive.HiveColumnHandle.ColumnType.PARTITION_KEY;
 import static io.trino.plugin.hive.HiveColumnHandle.ColumnType.REGULAR;
 import static io.trino.plugin.hive.HiveTestUtils.HDFS_ENVIRONMENT;
-import static io.trino.plugin.hive.HiveTestUtils.TYPE_MANAGER;
 import static io.trino.plugin.hive.HiveTestUtils.getDefaultHivePageSourceFactories;
 import static io.trino.plugin.hive.HiveTestUtils.getDefaultHiveRecordCursorProviders;
 import static io.trino.plugin.hive.HiveType.HIVE_INT;
 import static io.trino.plugin.hive.util.HiveBucketing.BucketingVersion.BUCKETING_V1;
 import static io.trino.spi.type.IntegerType.INTEGER;
+import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
 import static org.apache.hadoop.hive.serde.serdeConstants.SERIALIZATION_LIB;
@@ -68,7 +68,7 @@ public class TestNodeLocalDynamicSplitPruning
             BUCKET_COLUMN.getName(),
             0,
             BUCKET_COLUMN.getType(),
-            BUCKET_COLUMN.getType().getType(TYPE_MANAGER),
+            BUCKET_COLUMN.getType().getType(TESTING_TYPE_MANAGER),
             Optional.empty(),
             REGULAR,
             Optional.empty());
@@ -76,7 +76,7 @@ public class TestNodeLocalDynamicSplitPruning
             PARTITION_COLUMN.getName(),
             0,
             PARTITION_COLUMN.getType(),
-            PARTITION_COLUMN.getType().getType(TYPE_MANAGER),
+            PARTITION_COLUMN.getType().getType(TESTING_TYPE_MANAGER),
             Optional.empty(),
             PARTITION_KEY,
             Optional.empty());
@@ -86,7 +86,7 @@ public class TestNodeLocalDynamicSplitPruning
             throws IOException
     {
         HiveConfig config = new HiveConfig();
-        HiveTransactionHandle transaction = new HiveTransactionHandle();
+        HiveTransactionHandle transaction = new HiveTransactionHandle(false);
         try (TempFile tempFile = new TempFile()) {
             ConnectorPageSource emptyPageSource = createTestingPageSource(transaction, config, tempFile.file(), getDynamicFilter(getTupleDomainForBucketSplitPruning()));
             assertEquals(emptyPageSource.getClass(), EmptyPageSource.class);
@@ -101,7 +101,7 @@ public class TestNodeLocalDynamicSplitPruning
             throws IOException
     {
         HiveConfig config = new HiveConfig();
-        HiveTransactionHandle transaction = new HiveTransactionHandle();
+        HiveTransactionHandle transaction = new HiveTransactionHandle(false);
         try (TempFile tempFile = new TempFile()) {
             ConnectorPageSource emptyPageSource = createTestingPageSource(transaction, config, tempFile.file(), getDynamicFilter(getTupleDomainForPartitionSplitPruning()));
             assertEquals(emptyPageSource.getClass(), EmptyPageSource.class);
@@ -115,7 +115,7 @@ public class TestNodeLocalDynamicSplitPruning
     {
         Properties splitProperties = new Properties();
         splitProperties.setProperty(FILE_INPUT_FORMAT, hiveConfig.getHiveStorageFormat().getInputFormat());
-        splitProperties.setProperty(SERIALIZATION_LIB, hiveConfig.getHiveStorageFormat().getSerDe());
+        splitProperties.setProperty(SERIALIZATION_LIB, hiveConfig.getHiveStorageFormat().getSerde());
         HiveSplit split = new HiveSplit(
                 SCHEMA_NAME,
                 TABLE_NAME,
@@ -153,11 +153,10 @@ public class TestNodeLocalDynamicSplitPruning
                                 20,
                                 20,
                                 ImmutableList.of()))),
-                transaction,
-                Optional.empty());
+                transaction);
 
         HivePageSourceProvider provider = new HivePageSourceProvider(
-                TYPE_MANAGER,
+                TESTING_TYPE_MANAGER,
                 HDFS_ENVIRONMENT,
                 hiveConfig,
                 getDefaultHivePageSourceFactories(HDFS_ENVIRONMENT, hiveConfig),

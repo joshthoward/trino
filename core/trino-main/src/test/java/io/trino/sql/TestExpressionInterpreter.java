@@ -17,10 +17,8 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
-import io.trino.metadata.Metadata;
-import io.trino.metadata.TestingFunctionResolution;
 import io.trino.security.AllowAllAccessControl;
-import io.trino.spi.type.Decimals;
+import io.trino.spi.type.Int128;
 import io.trino.spi.type.SqlTimestampWithTimeZone;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarbinaryType;
@@ -29,7 +27,6 @@ import io.trino.sql.parser.SqlParser;
 import io.trino.sql.planner.ExpressionInterpreter;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.SymbolResolver;
-import io.trino.sql.planner.TypeAnalyzer;
 import io.trino.sql.planner.TypeProvider;
 import io.trino.sql.planner.assertions.SymbolAliases;
 import io.trino.sql.planner.iterative.rule.CanonicalizeExpressionRewriter;
@@ -46,7 +43,6 @@ import org.joda.time.LocalDate;
 import org.joda.time.LocalTime;
 import org.testng.annotations.Test;
 
-import java.math.BigInteger;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -75,6 +71,8 @@ import static io.trino.sql.ExpressionTestUtils.getTypes;
 import static io.trino.sql.ExpressionTestUtils.resolveFunctionCalls;
 import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
 import static io.trino.sql.ParsingUtil.createParsingOptions;
+import static io.trino.sql.planner.TestingPlannerContext.PLANNER_CONTEXT;
+import static io.trino.sql.planner.TypeAnalyzer.createTestingTypeAnalyzer;
 import static io.trino.testing.assertions.TrinoExceptionAssert.assertTrinoExceptionThrownBy;
 import static io.trino.type.DateTimes.scaleEpochMillisToMicros;
 import static io.trino.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
@@ -118,7 +116,7 @@ public class TestExpressionInterpreter
             .put(new Symbol("unbound_interval"), INTERVAL_DAY_TIME)
             .put(new Symbol("unbound_pattern"), VARCHAR)
             .put(new Symbol("unbound_null_string"), VARCHAR)
-            .build());
+            .buildOrThrow());
 
     private static final SymbolResolver INPUTS = symbol -> {
         switch (symbol.getName().toLowerCase(ENGLISH)) {
@@ -145,15 +143,13 @@ public class TestExpressionInterpreter
             case "bound_decimal_short":
                 return 12345L;
             case "bound_decimal_long":
-                return Decimals.encodeUnscaledValue(new BigInteger("12345678901234567890123"));
+                return Int128.valueOf("12345678901234567890123");
         }
 
         return symbol.toSymbolReference();
     };
 
     private static final SqlParser SQL_PARSER = new SqlParser();
-    private static final TestingFunctionResolution FUNCTION_RESOLUTION = new TestingFunctionResolution();
-    private static final Metadata METADATA = FUNCTION_RESOLUTION.getMetadata();
 
     @Test
     public void testAnd()
@@ -604,10 +600,10 @@ public class TestExpressionInterpreter
         assertOptimizedEquals("CAST(-12300000000 AS varchar)", "'-12300000000'");
 
         // double
-        assertOptimizedEquals("CAST(123.0E0 AS varchar)", "'123.0'");
-        assertOptimizedEquals("CAST(-123.0E0 AS varchar)", "'-123.0'");
-        assertOptimizedEquals("CAST(123.456E0 AS varchar)", "'123.456'");
-        assertOptimizedEquals("CAST(-123.456E0 AS varchar)", "'-123.456'");
+        assertOptimizedEquals("CAST(123.0E0 AS varchar)", "'1.23E2'");
+        assertOptimizedEquals("CAST(-123.0E0 AS varchar)", "'-1.23E2'");
+        assertOptimizedEquals("CAST(123.456E0 AS varchar)", "'1.23456E2'");
+        assertOptimizedEquals("CAST(-123.456E0 AS varchar)", "'-1.23456E2'");
 
         // boolean
         assertOptimizedEquals("CAST(true AS varchar)", "'true'");
@@ -733,51 +729,48 @@ public class TestExpressionInterpreter
         assertEvaluatedEquals("CAST(DOUBLE 'Infinity' AS varchar(8))", "'Infinity'");
         assertEvaluatedEquals("CAST(DOUBLE 'Infinity' AS varchar(50))", "'Infinity'");
 
-        // incorrect behavior: the string representation is not compliant with the SQL standard
-        assertEvaluatedEquals("CAST(0e0 AS varchar(3))", "'0.0'");
-        assertEvaluatedEquals("CAST(DOUBLE '0' AS varchar(3))", "'0.0'");
-        assertEvaluatedEquals("CAST(DOUBLE '-0' AS varchar(4))", "'-0.0'");
-        assertEvaluatedEquals("CAST(DOUBLE '0' AS varchar(50))", "'0.0'");
+        assertEvaluatedEquals("CAST(0e0 AS varchar(3))", "'0E0'");
+        assertEvaluatedEquals("CAST(DOUBLE '0' AS varchar(3))", "'0E0'");
+        assertEvaluatedEquals("CAST(DOUBLE '-0' AS varchar(4))", "'-0E0'");
+        assertEvaluatedEquals("CAST(DOUBLE '0' AS varchar(50))", "'0E0'");
 
-        assertEvaluatedEquals("CAST(12e0 AS varchar(4))", "'12.0'");
-        assertEvaluatedEquals("CAST(12e2 AS varchar(6))", "'1200.0'");
-        assertEvaluatedEquals("CAST(12e-2 AS varchar(4))", "'0.12'");
+        assertEvaluatedEquals("CAST(12e0 AS varchar(5))", "'1.2E1'");
+        assertEvaluatedEquals("CAST(12e2 AS varchar(6))", "'1.2E3'");
+        assertEvaluatedEquals("CAST(12e-2 AS varchar(6))", "'1.2E-1'");
 
-        assertEvaluatedEquals("CAST(12e0 AS varchar(50))", "'12.0'");
-        assertEvaluatedEquals("CAST(12e2 AS varchar(50))", "'1200.0'");
-        assertEvaluatedEquals("CAST(12e-2 AS varchar(50))", "'0.12'");
+        assertEvaluatedEquals("CAST(12e0 AS varchar(50))", "'1.2E1'");
+        assertEvaluatedEquals("CAST(12e2 AS varchar(50))", "'1.2E3'");
+        assertEvaluatedEquals("CAST(12e-2 AS varchar(50))", "'1.2E-1'");
 
-        assertEvaluatedEquals("CAST(-12e0 AS varchar(5))", "'-12.0'");
-        assertEvaluatedEquals("CAST(-12e2 AS varchar(7))", "'-1200.0'");
-        assertEvaluatedEquals("CAST(-12e-2 AS varchar(5))", "'-0.12'");
+        assertEvaluatedEquals("CAST(-12e0 AS varchar(6))", "'-1.2E1'");
+        assertEvaluatedEquals("CAST(-12e2 AS varchar(6))", "'-1.2E3'");
+        assertEvaluatedEquals("CAST(-12e-2 AS varchar(7))", "'-1.2E-1'");
 
-        assertEvaluatedEquals("CAST(-12e0 AS varchar(50))", "'-12.0'");
-        assertEvaluatedEquals("CAST(-12e2 AS varchar(50))", "'-1200.0'");
-        assertEvaluatedEquals("CAST(-12e-2 AS varchar(50))", "'-0.12'");
+        assertEvaluatedEquals("CAST(-12e0 AS varchar(50))", "'-1.2E1'");
+        assertEvaluatedEquals("CAST(-12e2 AS varchar(50))", "'-1.2E3'");
+        assertEvaluatedEquals("CAST(-12e-2 AS varchar(50))", "'-1.2E-1'");
 
-        // the string representation is compliant with the SQL standard
         assertEvaluatedEquals("CAST(12345678.9e0 AS varchar(12))", "'1.23456789E7'");
         assertEvaluatedEquals("CAST(0.00001e0 AS varchar(6))", "'1.0E-5'");
 
-        // the result value does not fit in the type (also, it is not compliant with the SQL standard)
+        // the result value does not fit in the type
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(12e0 AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value 12.0 cannot be represented as varchar(1)");
+                .hasMessage("Value 12.0 (1.2E1) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(-12e2 AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value -1200.0 cannot be represented as varchar(1)");
+                .hasMessage("Value -1200.0 (-1.2E3) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(0e0 AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value 0.0 cannot be represented as varchar(1)");
+                .hasMessage("Value 0.0 (0E0) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(0e0 / 0e0 AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value NaN cannot be represented as varchar(1)");
+                .hasMessage("Value NaN (NaN) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(DOUBLE 'Infinity' AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value Infinity cannot be represented as varchar(1)");
-        assertTrinoExceptionThrownBy(() -> evaluate("CAST(1200000e0 AS varchar(5))"))
-                .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value 1200000.0 cannot be represented as varchar(5)");
+                .hasMessage("Value Infinity (Infinity) cannot be represented as varchar(1)");
+
+        assertEvaluatedEquals("CAST(1200000e0 AS varchar(5))", "'1.2E6'");
     }
 
     @Test
@@ -791,50 +784,63 @@ public class TestExpressionInterpreter
         assertEvaluatedEquals("CAST(REAL 'Infinity' AS varchar(8))", "'Infinity'");
         assertEvaluatedEquals("CAST(REAL 'Infinity' AS varchar(50))", "'Infinity'");
 
-        // incorrect behavior: the string representation is not compliant with the SQL standard
-        assertEvaluatedEquals("CAST(REAL '0' AS varchar(3))", "'0.0'");
-        assertEvaluatedEquals("CAST(REAL '-0' AS varchar(4))", "'-0.0'");
-        assertEvaluatedEquals("CAST(REAL '0' AS varchar(50))", "'0.0'");
+        assertEvaluatedEquals("CAST(REAL '0' AS varchar(3))", "'0E0'");
+        assertEvaluatedEquals("CAST(REAL '-0' AS varchar(4))", "'-0E0'");
+        assertEvaluatedEquals("CAST(REAL '0' AS varchar(50))", "'0E0'");
 
-        assertEvaluatedEquals("CAST(REAL '12' AS varchar(4))", "'12.0'");
-        assertEvaluatedEquals("CAST(REAL '12e2' AS varchar(6))", "'1200.0'");
-        assertEvaluatedEquals("CAST(REAL '12e-2' AS varchar(4))", "'0.12'");
+        assertEvaluatedEquals("CAST(REAL '12' AS varchar(5))", "'1.2E1'");
+        assertEvaluatedEquals("CAST(REAL '12e2' AS varchar(5))", "'1.2E3'");
+        assertEvaluatedEquals("CAST(REAL '12e-2' AS varchar(6))", "'1.2E-1'");
 
-        assertEvaluatedEquals("CAST(REAL '12' AS varchar(50))", "'12.0'");
-        assertEvaluatedEquals("CAST(REAL '12e2' AS varchar(50))", "'1200.0'");
-        assertEvaluatedEquals("CAST(REAL '12e-2' AS varchar(50))", "'0.12'");
+        assertEvaluatedEquals("CAST(REAL '12' AS varchar(50))", "'1.2E1'");
+        assertEvaluatedEquals("CAST(REAL '12e2' AS varchar(50))", "'1.2E3'");
+        assertEvaluatedEquals("CAST(REAL '12e-2' AS varchar(50))", "'1.2E-1'");
 
-        assertEvaluatedEquals("CAST(REAL '-12' AS varchar(5))", "'-12.0'");
-        assertEvaluatedEquals("CAST(REAL '-12e2' AS varchar(7))", "'-1200.0'");
-        assertEvaluatedEquals("CAST(REAL '-12e-2' AS varchar(5))", "'-0.12'");
+        assertEvaluatedEquals("CAST(REAL '-12' AS varchar(6))", "'-1.2E1'");
+        assertEvaluatedEquals("CAST(REAL '-12e2' AS varchar(6))", "'-1.2E3'");
+        assertEvaluatedEquals("CAST(REAL '-12e-2' AS varchar(7))", "'-1.2E-1'");
 
-        assertEvaluatedEquals("CAST(REAL '-12' AS varchar(50))", "'-12.0'");
-        assertEvaluatedEquals("CAST(REAL '-12e2' AS varchar(50))", "'-1200.0'");
-        assertEvaluatedEquals("CAST(REAL '-12e-2' AS varchar(50))", "'-0.12'");
+        assertEvaluatedEquals("CAST(REAL '-12' AS varchar(50))", "'-1.2E1'");
+        assertEvaluatedEquals("CAST(REAL '-12e2' AS varchar(50))", "'-1.2E3'");
+        assertEvaluatedEquals("CAST(REAL '-12e-2' AS varchar(50))", "'-1.2E-1'");
 
-        // the string representation is compliant with the SQL standard
-        assertEvaluatedEquals("CAST(REAL '12345678.9e0' AS varchar(12))", "'1.2345679E7'");
-        assertEvaluatedEquals("CAST(REAL '0.00001e0' AS varchar(6))", "'1.0E-5'");
+        assertEvaluatedEquals("CAST(REAL '12345678.9e0' AS varchar(12))", "'1.234568E7'");
+        assertEvaluatedEquals("CAST(REAL '0.00001e0' AS varchar(12))", "'1.0E-5'");
 
-        // the result value does not fit in the type (also, it is not compliant with the SQL standard)
+        // the result value does not fit in the type
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(REAL '12' AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value 12.0 cannot be represented as varchar(1)");
+                .hasMessage("Value 12.0 (1.2E1) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(REAL '-12e2' AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value -1200.0 cannot be represented as varchar(1)");
+                .hasMessage("Value -1200.0 (-1.2E3) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(REAL '0' AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value 0.0 cannot be represented as varchar(1)");
+                .hasMessage("Value 0.0 (0E0) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(REAL '0e0' / REAL '0e0' AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value NaN cannot be represented as varchar(1)");
+                .hasMessage("Value NaN (NaN) cannot be represented as varchar(1)");
         assertTrinoExceptionThrownBy(() -> evaluate("CAST(REAL 'Infinity' AS varchar(1))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value Infinity cannot be represented as varchar(1)");
-        assertTrinoExceptionThrownBy(() -> evaluate("CAST(REAL '1200000' AS varchar(5))"))
+                .hasMessage("Value Infinity (Infinity) cannot be represented as varchar(1)");
+
+        assertEvaluatedEquals("CAST(REAL '1200000' AS varchar(5))", "'1.2E6'");
+    }
+
+    @Test
+    public void testCastDateToBoundedVarchar()
+    {
+        assertEvaluatedEquals("CAST(DATE '2013-02-02' AS varchar(10))", "'2013-02-02'");
+        // according to the SQL standard, this literal is incorrect. Year should be unsigned. https://github.com/trinodb/trino/issues/10677
+        assertEvaluatedEquals("CAST(DATE '-2013-02-02' AS varchar(50))", "'-2013-02-02'");
+
+        // the result value does not fit in the type
+        assertTrinoExceptionThrownBy(() -> evaluate("CAST(DATE '2013-02-02' AS varchar(9))"))
                 .hasErrorCode(INVALID_CAST_ARGUMENT)
-                .hasMessage("Value 1200000.0 cannot be represented as varchar(5)");
+                .hasMessage("Value 2013-02-02 cannot be represented as varchar(9)");
+        assertTrinoExceptionThrownBy(() -> evaluate("CAST(DATE '-2013-02-02' AS varchar(9))"))
+                .hasErrorCode(INVALID_CAST_ARGUMENT)
+                .hasMessage("Value -2013-02-02 cannot be represented as varchar(9)");
     }
 
     @Test
@@ -1926,8 +1932,8 @@ public class TestExpressionInterpreter
 
     static Object optimize(Expression parsedExpression)
     {
-        Map<NodeRef<Expression>, Type> expressionTypes = getTypes(TEST_SESSION, METADATA, SYMBOL_TYPES, parsedExpression);
-        ExpressionInterpreter interpreter = new ExpressionInterpreter(parsedExpression, METADATA, TEST_SESSION, expressionTypes);
+        Map<NodeRef<Expression>, Type> expressionTypes = getTypes(TEST_SESSION, PLANNER_CONTEXT, SYMBOL_TYPES, parsedExpression);
+        ExpressionInterpreter interpreter = new ExpressionInterpreter(parsedExpression, PLANNER_CONTEXT, TEST_SESSION, expressionTypes);
         return interpreter.optimize(INPUTS);
     }
 
@@ -1939,12 +1945,12 @@ public class TestExpressionInterpreter
                 .execute(TEST_SESSION, transactionSession -> {
                     Expression parsedExpression = SQL_PARSER.createExpression(expression, createParsingOptions(transactionSession));
                     parsedExpression = rewriteIdentifiersToSymbolReferences(parsedExpression);
-                    parsedExpression = resolveFunctionCalls(METADATA, transactionSession, SYMBOL_TYPES, parsedExpression);
+                    parsedExpression = resolveFunctionCalls(PLANNER_CONTEXT, transactionSession, SYMBOL_TYPES, parsedExpression);
                     parsedExpression = CanonicalizeExpressionRewriter.rewrite(
                             parsedExpression,
                             transactionSession,
-                            METADATA,
-                            new TypeAnalyzer(SQL_PARSER, METADATA),
+                            PLANNER_CONTEXT,
+                            createTestingTypeAnalyzer(PLANNER_CONTEXT),
                             SYMBOL_TYPES);
                     return parsedExpression;
                 });
@@ -1959,7 +1965,7 @@ public class TestExpressionInterpreter
     {
         assertRoundTrip(expression);
 
-        Expression parsedExpression = ExpressionTestUtils.createExpression(expression, METADATA, SYMBOL_TYPES);
+        Expression parsedExpression = ExpressionTestUtils.createExpression(expression, PLANNER_CONTEXT, SYMBOL_TYPES);
 
         return evaluate(parsedExpression);
     }
@@ -1974,8 +1980,8 @@ public class TestExpressionInterpreter
 
     private static Object evaluate(Expression expression)
     {
-        Map<NodeRef<Expression>, Type> expressionTypes = getTypes(TEST_SESSION, METADATA, SYMBOL_TYPES, expression);
-        ExpressionInterpreter interpreter = new ExpressionInterpreter(expression, METADATA, TEST_SESSION, expressionTypes);
+        Map<NodeRef<Expression>, Type> expressionTypes = getTypes(TEST_SESSION, PLANNER_CONTEXT, SYMBOL_TYPES, expression);
+        ExpressionInterpreter interpreter = new ExpressionInterpreter(expression, PLANNER_CONTEXT, TEST_SESSION, expressionTypes);
 
         return interpreter.evaluate(INPUTS);
     }

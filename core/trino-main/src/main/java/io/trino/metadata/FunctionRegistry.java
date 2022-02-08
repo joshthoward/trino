@@ -13,7 +13,6 @@
  */
 package io.trino.metadata;
 
-import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
@@ -22,6 +21,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import io.trino.FeaturesConfig;
+import io.trino.collect.cache.NonEvictableCache;
 import io.trino.operator.aggregation.AggregationMetadata;
 import io.trino.operator.aggregation.ApproximateCountDistinctAggregation;
 import io.trino.operator.aggregation.ApproximateDoublePercentileAggregations;
@@ -51,7 +51,6 @@ import io.trino.operator.aggregation.DoubleHistogramAggregation;
 import io.trino.operator.aggregation.DoubleRegressionAggregation;
 import io.trino.operator.aggregation.DoubleSumAggregation;
 import io.trino.operator.aggregation.GeometricMeanAggregations;
-import io.trino.operator.aggregation.InternalAggregationFunction;
 import io.trino.operator.aggregation.IntervalDayToSecondAverageAggregation;
 import io.trino.operator.aggregation.IntervalDayToSecondSumAggregation;
 import io.trino.operator.aggregation.IntervalYearToMonthAverageAggregation;
@@ -277,12 +276,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Supplier;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static io.trino.collect.cache.SafeCaches.buildNonEvictableCache;
 import static io.trino.metadata.FunctionKind.AGGREGATE;
 import static io.trino.metadata.Signature.isOperatorName;
 import static io.trino.metadata.Signature.unmangleOperator;
@@ -343,7 +342,6 @@ import static io.trino.operator.scalar.RowToRowCast.ROW_TO_ROW_CAST;
 import static io.trino.operator.scalar.TryCastFunction.TRY_CAST;
 import static io.trino.operator.scalar.ZipFunction.ZIP_FUNCTIONS;
 import static io.trino.operator.scalar.ZipWithFunction.ZIP_WITH_FUNCTION;
-import static io.trino.operator.window.AggregateWindowFunction.supplier;
 import static io.trino.type.DecimalCasts.BIGINT_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalCasts.BOOLEAN_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalCasts.DECIMAL_TO_BIGINT_CAST;
@@ -383,13 +381,13 @@ import static java.util.concurrent.TimeUnit.HOURS;
 @ThreadSafe
 public class FunctionRegistry
 {
-    private final Cache<FunctionKey, ScalarFunctionImplementation> specializedScalarCache;
-    private final Cache<FunctionKey, InternalAggregationFunction> specializedAggregationCache;
-    private final Cache<FunctionKey, WindowFunctionSupplier> specializedWindowCache;
+    private final NonEvictableCache<FunctionKey, ScalarFunctionImplementation> specializedScalarCache;
+    private final NonEvictableCache<FunctionKey, AggregationMetadata> specializedAggregationCache;
+    private final NonEvictableCache<FunctionKey, WindowFunctionSupplier> specializedWindowCache;
     private volatile FunctionMap functions = new FunctionMap();
 
     public FunctionRegistry(
-            Supplier<BlockEncodingSerde> blockEncodingSerdeSupplier,
+            BlockEncodingSerde blockEncodingSerde,
             FeaturesConfig featuresConfig,
             TypeOperators typeOperators,
             BlockTypeOperators blockTypeOperators,
@@ -401,20 +399,17 @@ public class FunctionRegistry
         // with generated classes and/or dynamically-created MethodHandles.
         // This might also mitigate problems like deoptimization storm or unintended interpreted execution.
 
-        specializedScalarCache = CacheBuilder.newBuilder()
+        specializedScalarCache = buildNonEvictableCache(CacheBuilder.newBuilder()
                 .maximumSize(1000)
-                .expireAfterWrite(1, HOURS)
-                .build();
+                .expireAfterWrite(1, HOURS));
 
-        specializedAggregationCache = CacheBuilder.newBuilder()
+        specializedAggregationCache = buildNonEvictableCache(CacheBuilder.newBuilder()
                 .maximumSize(1000)
-                .expireAfterWrite(1, HOURS)
-                .build();
+                .expireAfterWrite(1, HOURS));
 
-        specializedWindowCache = CacheBuilder.newBuilder()
+        specializedWindowCache = buildNonEvictableCache(CacheBuilder.newBuilder()
                 .maximumSize(1000)
-                .expireAfterWrite(1, HOURS)
-                .build();
+                .expireAfterWrite(1, HOURS));
 
         FunctionListBuilder builder = new FunctionListBuilder()
                 .window(RowNumberFunction.class)
@@ -617,7 +612,7 @@ public class FunctionRegistry
                 .functions(MAP_FILTER_FUNCTION, new MapTransformKeysFunction(blockTypeOperators), MAP_TRANSFORM_VALUES_FUNCTION)
                 .function(FORMAT_FUNCTION)
                 .function(TRY_CAST)
-                .function(new LiteralFunction(blockEncodingSerdeSupplier))
+                .function(new LiteralFunction(blockEncodingSerde))
                 .function(new GenericEqualOperator(typeOperators))
                 .function(new GenericHashCodeOperator(typeOperators))
                 .function(new GenericXxHash64Operator(typeOperators))
@@ -838,12 +833,7 @@ public class FunctionRegistry
 
     public WindowFunctionSupplier getWindowFunctionImplementation(FunctionId functionId, BoundSignature boundSignature, FunctionDependencies functionDependencies)
     {
-        SqlFunction function = functions.get(functionId);
         try {
-            if (function instanceof SqlAggregationFunction) {
-                InternalAggregationFunction aggregationFunction = specializedAggregationCache.get(new FunctionKey(functionId, boundSignature), () -> specializedAggregation(functionId, boundSignature, functionDependencies));
-                return supplier(function.getFunctionMetadata().getSignature(), aggregationFunction);
-            }
             return specializedWindowCache.get(new FunctionKey(functionId, boundSignature), () -> specializeWindow(functionId, boundSignature, functionDependencies));
         }
         catch (ExecutionException | UncheckedExecutionException e) {
@@ -858,7 +848,7 @@ public class FunctionRegistry
         return function.specialize(boundSignature, functionDependencies);
     }
 
-    public InternalAggregationFunction getAggregateFunctionImplementation(FunctionId functionId, BoundSignature boundSignature, FunctionDependencies functionDependencies)
+    public AggregationMetadata getAggregateFunctionImplementation(FunctionId functionId, BoundSignature boundSignature, FunctionDependencies functionDependencies)
     {
         try {
             return specializedAggregationCache.get(new FunctionKey(functionId, boundSignature), () -> specializedAggregation(functionId, boundSignature, functionDependencies));
@@ -869,11 +859,10 @@ public class FunctionRegistry
         }
     }
 
-    private InternalAggregationFunction specializedAggregation(FunctionId functionId, BoundSignature boundSignature, FunctionDependencies functionDependencies)
+    private AggregationMetadata specializedAggregation(FunctionId functionId, BoundSignature boundSignature, FunctionDependencies functionDependencies)
     {
         SqlAggregationFunction aggregationFunction = (SqlAggregationFunction) functions.get(functionId);
-        AggregationMetadata aggregationMetadata = aggregationFunction.specialize(boundSignature, functionDependencies);
-        return new InternalAggregationFunction(boundSignature, aggregationMetadata);
+        return aggregationFunction.specialize(boundSignature, functionDependencies);
     }
 
     public FunctionDependencyDeclaration getFunctionDependencies(FunctionBinding functionBinding)
@@ -921,7 +910,7 @@ public class FunctionRegistry
             this.functions = ImmutableMap.<FunctionId, SqlFunction>builder()
                     .putAll(map.functions)
                     .putAll(Maps.uniqueIndex(functions, function -> function.getFunctionMetadata().getFunctionId()))
-                    .build();
+                    .buildOrThrow();
 
             ImmutableListMultimap.Builder<QualifiedName, FunctionMetadata> functionsByName = ImmutableListMultimap.<QualifiedName, FunctionMetadata>builder()
                     .putAll(map.functionsByName);

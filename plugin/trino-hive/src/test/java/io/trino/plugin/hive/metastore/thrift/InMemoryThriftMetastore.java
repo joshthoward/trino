@@ -130,8 +130,9 @@ public class InMemoryThriftMetastore
         }
     }
 
+    // TODO: respect deleteData
     @Override
-    public synchronized void dropDatabase(HiveIdentity identity, String databaseName)
+    public synchronized void dropDatabase(HiveIdentity identity, String databaseName, boolean deleteData)
     {
         if (!databases.containsKey(databaseName)) {
             throw new SchemaNotFoundException(databaseName);
@@ -477,7 +478,7 @@ public class InMemoryThriftMetastore
             }
             result.put(partitionName, statistics);
         }
-        return result.build();
+        return result.buildOrThrow();
     }
 
     @Override

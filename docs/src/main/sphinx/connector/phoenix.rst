@@ -56,9 +56,16 @@ Property Name                                      Required   Description
                                                               default the location is ``/hbase``
 ``phoenix.config.resources``                       No         Comma-separated list of configuration files (e.g. ``hbase-site.xml``) to use for
                                                               connection properties.  These files must exist on the machines running Trino.
+``phoenix.max-scans-per-split``                    No         Maximum number of HBase scans that will be performed in a single split. Default is 20.
+                                                              Lower values will lead to more splits in Trino.
+                                                              Can also be set via session propery ``max_scans_per_split``.
+                                                              For details see: `<https://phoenix.apache.org/update_statistics.html>`_.
+                                                              (This setting has no effect when guideposts are disabled in Phoenix.)
 ================================================== ========== ===================================================================================
 
 .. include:: jdbc-common-configurations.fragment
+
+.. include:: jdbc-procedures.fragment
 
 .. include:: jdbc-case-insensitive-matching.fragment
 
@@ -101,19 +108,28 @@ The data type mappings are as follows:
 Phoenix                      Trino
 ==========================   ============
 ``BOOLEAN``                  (same)
-``BIGINT``                   (same)
-``INTEGER``                  (same)
-``SMALLINT``                 (same)
 ``TINYINT``                  (same)
-``DOUBLE``                   (same)
+``UNSIGNED_TINYINT``         ``TINYINT``
+``SMALLINT``                 (same)
+``UNSIGNED_SMALLINT``        ``SMALLINT``
+``INTEGER``                  (same)
+``UNSIGNED_INTEGER``         ``INTEGER``
+``BIGINT``                   (same)
+``UNSIGNED_LONG``            ``BIGINT``
 ``FLOAT``                    ``REAL``
+``UNSIGNED_FLOAT``           ``FLOAT``
+``DOUBLE``                   (same)
+``UNSIGNED_DOUBLE``          ``DOUBLE``
 ``DECIMAL``                  (same)
 ``BINARY``                   ``VARBINARY``
 ``VARBINARY``                (same)
-``DATE``                     (same)
 ``TIME``                     (same)
-``VARCHAR``                  (same)
+``UNSIGNED_TIME``            ``TIME``
+``DATE``                     (same)
+``UNSIGNED_DATE``            ``DATE``
 ``CHAR``                     (same)
+``VARCHAR``                  (same)
+``ARRAY``                    (same)
 ==========================   ============
 
 The Phoenix fixed length ``BINARY`` data type is mapped to the Trino

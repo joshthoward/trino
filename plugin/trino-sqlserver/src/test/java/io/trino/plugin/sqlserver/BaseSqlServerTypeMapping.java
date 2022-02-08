@@ -23,6 +23,7 @@ import io.trino.testing.datatype.CreateAsSelectDataSetup;
 import io.trino.testing.datatype.DataSetup;
 import io.trino.testing.datatype.SqlDataTypeTest;
 import io.trino.testing.sql.SqlExecutor;
+import io.trino.testing.sql.TestTable;
 import io.trino.testing.sql.TrinoSqlExecutor;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.DataProvider;
@@ -379,6 +380,17 @@ public abstract class BaseSqlServerTypeMapping
     }
 
     @Test
+    public void testDateJulianGregorianCalendarSwitch()
+    {
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_old_date", "(dt DATE)", ImmutableList.of("DATE '1582-10-05'", "DATE '1582-10-14'"))) {
+            // SQL Server returns +10 days when the date is in the range of 1582-10-05 and 1582-10-14, but we need to pass the original value in predicates
+            assertQuery("SELECT * FROM " + table.getName(), "VALUES DATE '1582-10-15', DATE '1582-10-24'");
+            assertQuery("SELECT * FROM " + table.getName() + " WHERE dt = DATE '1582-10-05'", "VALUES DATE '1582-10-15'");
+            assertQueryReturnsEmptyResult("SELECT * FROM " + table.getName() + " WHERE dt = DATE '1582-10-15'");
+        }
+    }
+
+    @Test
     public void testSqlServerDateUnsupported()
     {
         // SQL Server does not support > 4 digit years, this test will fail once > 4 digit years support will be added
@@ -469,7 +481,7 @@ public abstract class BaseSqlServerTypeMapping
                 .execute(getQueryRunner(), trinoCreateAsSelect(getSession(), "test_time"));
     }
 
-    @Test(dataProvider = "testTimestampDataProvider")
+    @Test(dataProvider = "sessionZonesDataProvider")
     public void testTimestamp(ZoneId sessionZone)
     {
         SqlDataTypeTest tests = SqlDataTypeTest.create()
@@ -609,7 +621,7 @@ public abstract class BaseSqlServerTypeMapping
                 .execute(getQueryRunner(), sqlServerCreateAndInsert("test_sqlserver_timestamp"));
     }
 
-    @Test(dataProvider = "testTimestampDataProvider")
+    @Test(dataProvider = "sessionZonesDataProvider")
     public void testSqlServerDatetimeOffset(ZoneId sessionZone)
     {
         Session session = Session.builder(getSession())
@@ -695,7 +707,7 @@ public abstract class BaseSqlServerTypeMapping
     }
 
     @DataProvider
-    public Object[][] testTimestampDataProvider()
+    public Object[][] sessionZonesDataProvider()
     {
         return new Object[][] {
                 {UTC},

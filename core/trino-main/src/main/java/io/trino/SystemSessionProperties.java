@@ -24,6 +24,7 @@ import io.trino.execution.TaskManagerConfig;
 import io.trino.execution.scheduler.NodeSchedulerConfig;
 import io.trino.memory.MemoryManagerConfig;
 import io.trino.memory.NodeMemoryConfig;
+import io.trino.operator.RetryPolicy;
 import io.trino.spi.TrinoException;
 import io.trino.spi.session.PropertyMetadata;
 
@@ -37,6 +38,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static io.trino.plugin.base.session.PropertyMetadataUtil.dataSizeProperty;
 import static io.trino.plugin.base.session.PropertyMetadataUtil.durationProperty;
 import static io.trino.spi.StandardErrorCode.INVALID_SESSION_PROPERTY;
+import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.session.PropertyMetadata.booleanProperty;
 import static io.trino.spi.session.PropertyMetadata.doubleProperty;
 import static io.trino.spi.session.PropertyMetadata.enumProperty;
@@ -91,8 +93,6 @@ public final class SystemSessionProperties
     public static final String OPTIMIZE_METADATA_QUERIES = "optimize_metadata_queries";
     public static final String QUERY_PRIORITY = "query_priority";
     public static final String SPILL_ENABLED = "spill_enabled";
-    public static final String SPILL_ORDER_BY = "spill_order_by";
-    public static final String SPILL_WINDOW_OPERATOR = "spill_window_operator";
     public static final String AGGREGATION_OPERATOR_UNSPILL_MEMORY_LIMIT = "aggregation_operator_unspill_memory_limit";
     public static final String OPTIMIZE_DISTINCT_AGGREGATIONS = "optimize_mixed_distinct_aggregations";
     public static final String ITERATIVE_OPTIMIZER_TIMEOUT = "iterative_optimizer_timeout";
@@ -128,7 +128,7 @@ public final class SystemSessionProperties
     public static final String ENABLE_COORDINATOR_DYNAMIC_FILTERS_DISTRIBUTION = "enable_coordinator_dynamic_filters_distribution";
     public static final String ENABLE_LARGE_DYNAMIC_FILTERS = "enable_large_dynamic_filters";
     public static final String QUERY_MAX_MEMORY_PER_NODE = "query_max_memory_per_node";
-    public static final String QUERY_MAX_TOTAL_MEMORY_PER_NODE = "query_max_total_memory_per_node";
+    public static final String QUERY_MAX_MEMORY_PER_TASK = "query_max_memory_per_task";
     public static final String IGNORE_DOWNSTREAM_PREFERENCES = "ignore_downstream_preferences";
     public static final String FILTERING_SEMI_JOIN_TO_INNER = "rewrite_filtering_semi_join_to_inner_join";
     public static final String OPTIMIZE_DUPLICATE_INSENSITIVE_JOINS = "optimize_duplicate_insensitive_joins";
@@ -143,6 +143,13 @@ public final class SystemSessionProperties
     public static final String LEGACY_CATALOG_ROLES = "legacy_catalog_roles";
     public static final String INCREMENTAL_HASH_ARRAY_LOAD_FACTOR_ENABLED = "incremental_hash_array_load_factor_enabled";
     public static final String MAX_PARTIAL_TOP_N_MEMORY = "max_partial_top_n_memory";
+    public static final String RETRY_POLICY = "retry_policy";
+    public static final String RETRY_ATTEMPTS = "retry_attempts";
+    public static final String RETRY_INITIAL_DELAY = "retry_initial_delay";
+    public static final String RETRY_MAX_DELAY = "retry_max_delay";
+    public static final String HIDE_INACCESSIBLE_COLUMNS = "hide_inaccessible_columns";
+    public static final String FAULT_TOLERANT_EXECUTION_TARGET_TASK_INPUT_SIZE = "fault_tolerant_execution_target_task_input_size";
+    public static final String FAULT_TOLERANT_EXECUTION_TARGET_TASK_SPLIT_COUNT = "fault_tolerant_execution_target_task_split_count";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -386,16 +393,6 @@ public final class SystemSessionProperties
                         "Enable spilling",
                         featuresConfig.isSpillEnabled(),
                         false),
-                booleanProperty(
-                        SPILL_ORDER_BY,
-                        "Spill in OrderBy if spill_enabled is also set",
-                        featuresConfig.isSpillOrderBy(),
-                        false),
-                booleanProperty(
-                        SPILL_WINDOW_OPERATOR,
-                        "Spill in WindowOperator if spill_enabled is also set",
-                        featuresConfig.isSpillWindowOperator(),
-                        false),
                 dataSizeProperty(
                         AGGREGATION_OPERATOR_UNSPILL_MEMORY_LIMIT,
                         "How much memory should be allocated per aggregation operator in unspilling process",
@@ -583,9 +580,9 @@ public final class SystemSessionProperties
                         nodeMemoryConfig.getMaxQueryMemoryPerNode(),
                         true),
                 dataSizeProperty(
-                        QUERY_MAX_TOTAL_MEMORY_PER_NODE,
-                        "Maximum amount of total memory a query can use per node",
-                        nodeMemoryConfig.getMaxQueryTotalMemoryPerNode(),
+                        QUERY_MAX_MEMORY_PER_TASK,
+                        "Maximum amount of memory a single task can use",
+                        nodeMemoryConfig.getMaxQueryMemoryPerTask().orElse(null),
                         true),
                 booleanProperty(
                         IGNORE_DOWNSTREAM_PREFERENCES,
@@ -665,6 +662,43 @@ public final class SystemSessionProperties
                         MAX_PARTIAL_TOP_N_MEMORY,
                         "Max memory size for partial Top N aggregations. This can be turned off by setting it with '0'.",
                         taskManagerConfig.getMaxPartialTopNMemory(),
+                        false),
+                enumProperty(
+                        RETRY_POLICY,
+                        "Retry policy",
+                        RetryPolicy.class,
+                        queryManagerConfig.getRetryPolicy(),
+                        false),
+                integerProperty(
+                        RETRY_ATTEMPTS,
+                        "Maximum number of retry attempts",
+                        queryManagerConfig.getRetryAttempts(),
+                        false),
+                durationProperty(
+                        RETRY_INITIAL_DELAY,
+                        "Initial delay before initiating a retry attempt. Delay increases exponentially for each subsequent attempt up to 'retry_max_delay'",
+                        queryManagerConfig.getRetryInitialDelay(),
+                        false),
+                durationProperty(
+                        RETRY_MAX_DELAY,
+                        "Maximum delay before initiating a retry attempt. Delay increases exponentially for each subsequent attempt starting from 'retry_initial_delay'",
+                        queryManagerConfig.getRetryMaxDelay(),
+                        false),
+                booleanProperty(
+                        HIDE_INACCESSIBLE_COLUMNS,
+                        "When enabled non-accessible columns are silently filtered from results from SELECT * statements",
+                        featuresConfig.isHideInaccessibleColumns(),
+                        value -> validateHideInaccessibleColumns(value, featuresConfig.isHideInaccessibleColumns()),
+                        false),
+                dataSizeProperty(
+                        FAULT_TOLERANT_EXECUTION_TARGET_TASK_INPUT_SIZE,
+                        "Target size in bytes of all task inputs for a single fault tolerant task",
+                        queryManagerConfig.getFaultTolerantExecutionTargetTaskInputSize(),
+                        false),
+                integerProperty(
+                        FAULT_TOLERANT_EXECUTION_TARGET_TASK_SPLIT_COUNT,
+                        "Target number of splits for a single fault tolerant task",
+                        queryManagerConfig.getFaultTolerantExecutionTargetTaskSplitCount(),
                         false));
     }
 
@@ -886,16 +920,6 @@ public final class SystemSessionProperties
         return session.getSystemProperty(SPILL_ENABLED, Boolean.class);
     }
 
-    public static boolean isSpillOrderBy(Session session)
-    {
-        return session.getSystemProperty(SPILL_ORDER_BY, Boolean.class);
-    }
-
-    public static boolean isSpillWindowOperator(Session session)
-    {
-        return session.getSystemProperty(SPILL_WINDOW_OPERATOR, Boolean.class);
-    }
-
     public static DataSize getAggregationOperatorUnspillMemoryLimit(Session session)
     {
         DataSize memoryLimitForMerge = session.getSystemProperty(AGGREGATION_OPERATOR_UNSPILL_MEMORY_LIMIT, DataSize.class);
@@ -975,6 +999,11 @@ public final class SystemSessionProperties
 
     public static boolean isDistributedSortEnabled(Session session)
     {
+        if (getRetryPolicy(session) != RetryPolicy.NONE) {
+            // distributed sort is not supported with failure recovery capabilities enabled
+            return false;
+        }
+
         return session.getSystemProperty(DISTRIBUTED_SORT, Boolean.class);
     }
 
@@ -996,6 +1025,13 @@ public final class SystemSessionProperties
     public static int getMaxGroupingSets(Session session)
     {
         return session.getSystemProperty(MAX_GROUPING_SETS, Integer.class);
+    }
+
+    private static void validateHideInaccessibleColumns(boolean value, boolean defaultValue)
+    {
+        if (defaultValue == true && value == false) {
+            throw new TrinoException(INVALID_SESSION_PROPERTY, format("%s cannot be disabled with session property when it was enabled with configuration", HIDE_INACCESSIBLE_COLUMNS));
+        }
     }
 
     public static OptionalInt getMaxDriversPerTask(Session session)
@@ -1109,9 +1145,9 @@ public final class SystemSessionProperties
         return session.getSystemProperty(QUERY_MAX_MEMORY_PER_NODE, DataSize.class);
     }
 
-    public static DataSize getQueryMaxTotalMemoryPerNode(Session session)
+    public static Optional<DataSize> getQueryMaxTotalMemoryPerTask(Session session)
     {
-        return session.getSystemProperty(QUERY_MAX_TOTAL_MEMORY_PER_NODE, DataSize.class);
+        return Optional.ofNullable(session.getSystemProperty(QUERY_MAX_MEMORY_PER_TASK, DataSize.class));
     }
 
     public static boolean ignoreDownStreamPreferences(Session session)
@@ -1182,5 +1218,51 @@ public final class SystemSessionProperties
     public static DataSize getMaxPartialTopNMemory(Session session)
     {
         return session.getSystemProperty(MAX_PARTIAL_TOP_N_MEMORY, DataSize.class);
+    }
+
+    public static RetryPolicy getRetryPolicy(Session session)
+    {
+        RetryPolicy retryPolicy = session.getSystemProperty(RETRY_POLICY, RetryPolicy.class);
+        if (retryPolicy != RetryPolicy.NONE) {
+            if (retryPolicy != RetryPolicy.QUERY && isEnableDynamicFiltering(session)) {
+                throw new TrinoException(NOT_SUPPORTED, "Dynamic filtering is not supported with automatic task retries enabled");
+            }
+        }
+        if (retryPolicy == RetryPolicy.TASK) {
+            if (isGroupedExecutionEnabled(session) || isDynamicScheduleForGroupedExecution(session)) {
+                throw new TrinoException(NOT_SUPPORTED, "Grouped execution is not supported with task level retries enabled");
+            }
+        }
+        return retryPolicy;
+    }
+
+    public static int getRetryAttempts(Session session)
+    {
+        return session.getSystemProperty(RETRY_ATTEMPTS, Integer.class);
+    }
+
+    public static Duration getRetryInitialDelay(Session session)
+    {
+        return session.getSystemProperty(RETRY_INITIAL_DELAY, Duration.class);
+    }
+
+    public static Duration getRetryMaxDelay(Session session)
+    {
+        return session.getSystemProperty(RETRY_MAX_DELAY, Duration.class);
+    }
+
+    public static boolean isHideInaccessibleColumns(Session session)
+    {
+        return session.getSystemProperty(HIDE_INACCESSIBLE_COLUMNS, Boolean.class);
+    }
+
+    public static DataSize getFaultTolerantExecutionTargetTaskInputSize(Session session)
+    {
+        return session.getSystemProperty(FAULT_TOLERANT_EXECUTION_TARGET_TASK_INPUT_SIZE, DataSize.class);
+    }
+
+    public static int getFaultTolerantExecutionTargetTaskSplitCount(Session session)
+    {
+        return session.getSystemProperty(FAULT_TOLERANT_EXECUTION_TARGET_TASK_SPLIT_COUNT, Integer.class);
     }
 }

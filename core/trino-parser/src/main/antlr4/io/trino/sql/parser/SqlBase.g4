@@ -89,6 +89,8 @@ statement
     | DROP MATERIALIZED VIEW (IF EXISTS)? qualifiedName                #dropMaterializedView
     | ALTER MATERIALIZED VIEW (IF EXISTS)? from=qualifiedName
         RENAME TO to=qualifiedName                                     #renameMaterializedView
+    | ALTER MATERIALIZED VIEW qualifiedName
+        SET PROPERTIES propertyAssignments                             #setMaterializedViewProperties
     | DROP VIEW (IF EXISTS)? qualifiedName                             #dropView
     | ALTER VIEW from=qualifiedName RENAME TO to=qualifiedName         #renameView
     | ALTER VIEW from=qualifiedName SET AUTHORIZATION principal        #setViewAuthorization
@@ -116,6 +118,10 @@ statement
         ON (SCHEMA | TABLE)? qualifiedName
         TO grantee=principal
         (WITH GRANT OPTION)?                                           #grant
+    | DENY
+        (privilege (',' privilege)* | ALL PRIVILEGES)
+        ON (SCHEMA | TABLE)? qualifiedName
+        TO grantee=principal                                           #deny
     | REVOKE
         (GRANT OPTION FOR)?
         (privilege (',' privilege)* | ALL PRIVILEGES)
@@ -195,7 +201,12 @@ propertyAssignments
     ;
 
 property
-    : identifier EQ expression
+    : identifier EQ propertyValue
+    ;
+
+propertyValue
+    : DEFAULT       #defaultPropertyValue
+    | expression    #nonDefaultPropertyValue
     ;
 
 queryNoWith
@@ -647,7 +658,7 @@ pathSpecification
     ;
 
 privilege
-    : SELECT | DELETE | INSERT | UPDATE
+    : CREATE | SELECT | DELETE | INSERT | UPDATE
     ;
 
 qualifiedName
@@ -698,10 +709,10 @@ nonReserved
     : ADD | ADMIN | AFTER | ALL | ANALYZE | ANY | ARRAY | ASC | AT | AUTHORIZATION
     | BERNOULLI
     | CALL | CASCADE | CATALOGS | COLUMN | COLUMNS | COMMENT | COMMIT | COMMITTED | COUNT | CURRENT
-    | DATA | DATE | DAY | DEFINE | DEFINER | DESC | DISTRIBUTED | DOUBLE
+    | DATA | DATE | DAY | DEFAULT | DEFINE | DEFINER | DESC | DISTRIBUTED | DOUBLE
     | EMPTY | ERROR | EXCLUDING | EXPLAIN
     | FETCH | FILTER | FINAL | FIRST | FOLLOWING | FORMAT | FUNCTIONS
-    | GRANT | GRANTED | GRANTS | GRAPHVIZ | GROUPS
+    | GRANT | DENY | GRANTED | GRANTS | GRAPHVIZ | GROUPS
     | HOUR
     | IF | IGNORE | INCLUDING | INITIAL | INPUT | INTERVAL | INVOKER | IO | ISOLATION
     | JSON
@@ -765,8 +776,10 @@ DATA: 'DATA';
 DATE: 'DATE';
 DAY: 'DAY';
 DEALLOCATE: 'DEALLOCATE';
+DEFAULT: 'DEFAULT';
 DEFINER: 'DEFINER';
 DELETE: 'DELETE';
+DENY: 'DENY';
 DESC: 'DESC';
 DESCRIBE: 'DESCRIBE';
 DEFINE: 'DEFINE';

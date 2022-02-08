@@ -20,7 +20,6 @@ import io.airlift.log.Logger;
 import io.airlift.log.Logging;
 import io.trino.Session;
 import io.trino.metadata.QualifiedObjectName;
-import io.trino.plugin.hive.authentication.HiveIdentity;
 import io.trino.plugin.hive.metastore.Database;
 import io.trino.plugin.hive.metastore.HiveMetastore;
 import io.trino.plugin.hive.metastore.MetastoreConfig;
@@ -53,7 +52,6 @@ import static io.trino.plugin.hive.security.HiveSecurityModule.SQL_STANDARD;
 import static io.trino.plugin.tpch.TpchMetadata.TINY_SCHEMA_NAME;
 import static io.trino.spi.security.SelectedRole.Type.ROLE;
 import static io.trino.testing.QueryAssertions.copyTpchTables;
-import static io.trino.testing.TestingConnectorSession.SESSION;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 import static java.lang.String.format;
 import static java.nio.file.Files.createDirectories;
@@ -85,6 +83,11 @@ public final class HiveQueryRunner
         return new Builder<>();
     }
 
+    public static Builder<Builder<?>> builder(Session defaultSession)
+    {
+        return new Builder<>(defaultSession);
+    }
+
     public static class Builder<SELF extends Builder<?>>
             extends DistributedQueryRunner.Builder<SELF>
     {
@@ -92,6 +95,7 @@ public final class HiveQueryRunner
         private ImmutableMap.Builder<String, String> hiveProperties = ImmutableMap.builder();
         private List<TpchTable<?>> initialTables = ImmutableList.of();
         private Optional<String> initialSchemasLocationBase = Optional.empty();
+        private Function<Session, Session> initialTablesSessionMutator = Function.identity();
         private Function<DistributedQueryRunner, HiveMetastore> metastore = queryRunner -> {
             File baseDir = queryRunner.getCoordinator().getBaseDataDir().resolve("hive_data").toFile();
             return new FileHiveMetastore(
@@ -106,7 +110,12 @@ public final class HiveQueryRunner
 
         protected Builder()
         {
-            super(createSession(Optional.of(new SelectedRole(ROLE, Optional.of("admin")))));
+            this(createSession(Optional.of(new SelectedRole(ROLE, Optional.of("admin")))));
+        }
+
+        protected Builder(Session defaultSession)
+        {
+            super(defaultSession);
         }
 
         public SELF setSkipTimezoneSetup(boolean skipTimezoneSetup)
@@ -137,6 +146,12 @@ public final class HiveQueryRunner
         public SELF setInitialSchemasLocationBase(String initialSchemasLocationBase)
         {
             this.initialSchemasLocationBase = Optional.of(initialSchemasLocationBase);
+            return self();
+        }
+
+        public SELF setInitialTablesSessionMutator(Function<Session, Session> initialTablesSessionMutator)
+        {
+            this.initialTablesSessionMutator = requireNonNull(initialTablesSessionMutator, "initialTablesSessionMutator is null");
             return self();
         }
 
@@ -175,7 +190,7 @@ public final class HiveQueryRunner
                 }
                 hiveProperties.put("hive.max-partitions-per-scan", "1000");
                 hiveProperties.put("hive.security", SQL_STANDARD);
-                hiveProperties.putAll(this.hiveProperties.build());
+                hiveProperties.putAll(this.hiveProperties.buildOrThrow());
 
                 Map<String, String> hiveBucketedProperties = ImmutableMap.<String, String>builder()
                         .putAll(hiveProperties)
@@ -183,7 +198,7 @@ public final class HiveQueryRunner
                         .put("hive.max-split-size", "10kB") // so that each bucket has multiple splits
                         .put("hive.storage-format", "TEXTFILE") // so that there's no minimum split size for the file
                         .put("hive.compression-codec", "NONE") // so that the file is splittable
-                        .build();
+                        .buildOrThrow();
                 queryRunner.createCatalog(HIVE_CATALOG, "hive", hiveProperties);
                 queryRunner.createCatalog(HIVE_BUCKETED_CATALOG, "hive", hiveBucketedProperties);
 
@@ -199,15 +214,16 @@ public final class HiveQueryRunner
 
         private void populateData(DistributedQueryRunner queryRunner, HiveMetastore metastore)
         {
-            HiveIdentity identity = new HiveIdentity(SESSION);
             if (metastore.getDatabase(TPCH_SCHEMA).isEmpty()) {
-                metastore.createDatabase(identity, createDatabaseMetastoreObject(TPCH_SCHEMA, initialSchemasLocationBase));
-                copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(Optional.empty()), initialTables);
+                metastore.createDatabase(createDatabaseMetastoreObject(TPCH_SCHEMA, initialSchemasLocationBase));
+                Session session = initialTablesSessionMutator.apply(createSession(Optional.empty()));
+                copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, session, initialTables);
             }
 
             if (metastore.getDatabase(TPCH_BUCKETED_SCHEMA).isEmpty()) {
-                metastore.createDatabase(identity, createDatabaseMetastoreObject(TPCH_BUCKETED_SCHEMA, initialSchemasLocationBase));
-                copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, createBucketedSession(Optional.empty()), initialTables);
+                metastore.createDatabase(createDatabaseMetastoreObject(TPCH_BUCKETED_SCHEMA, initialSchemasLocationBase));
+                Session session = initialTablesSessionMutator.apply(createBucketedSession(Optional.empty()));
+                copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, session, initialTables);
             }
         }
     }

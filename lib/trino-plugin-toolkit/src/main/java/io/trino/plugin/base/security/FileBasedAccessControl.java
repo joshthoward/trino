@@ -26,7 +26,7 @@ import io.trino.spi.security.TrinoPrincipal;
 import io.trino.spi.security.ViewExpression;
 import io.trino.spi.type.Type;
 
-import java.nio.file.Paths;
+import java.io.File;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -53,6 +53,8 @@ import static io.trino.spi.security.AccessDeniedException.denyCreateTable;
 import static io.trino.spi.security.AccessDeniedException.denyCreateView;
 import static io.trino.spi.security.AccessDeniedException.denyCreateViewWithSelect;
 import static io.trino.spi.security.AccessDeniedException.denyDeleteTable;
+import static io.trino.spi.security.AccessDeniedException.denyDenySchemaPrivilege;
+import static io.trino.spi.security.AccessDeniedException.denyDenyTablePrivilege;
 import static io.trino.spi.security.AccessDeniedException.denyDropColumn;
 import static io.trino.spi.security.AccessDeniedException.denyDropMaterializedView;
 import static io.trino.spi.security.AccessDeniedException.denyDropRole;
@@ -74,6 +76,7 @@ import static io.trino.spi.security.AccessDeniedException.denyRevokeSchemaPrivil
 import static io.trino.spi.security.AccessDeniedException.denyRevokeTablePrivilege;
 import static io.trino.spi.security.AccessDeniedException.denySelectTable;
 import static io.trino.spi.security.AccessDeniedException.denySetCatalogSessionProperty;
+import static io.trino.spi.security.AccessDeniedException.denySetMaterializedViewProperties;
 import static io.trino.spi.security.AccessDeniedException.denySetRole;
 import static io.trino.spi.security.AccessDeniedException.denySetSchemaAuthorization;
 import static io.trino.spi.security.AccessDeniedException.denySetTableAuthorization;
@@ -98,12 +101,12 @@ public class FileBasedAccessControl
     private final List<SessionPropertyAccessControlRule> sessionPropertyRules;
     private final Set<AnySchemaPermissionsRule> anySchemaPermissionsRules;
 
-    public FileBasedAccessControl(CatalogName catalogName, FileBasedAccessControlConfig config)
+    public FileBasedAccessControl(CatalogName catalogName, File configFile)
     {
         this.catalogName = requireNonNull(catalogName, "catalogName is null").toString();
 
-        AccessControlRules rules = parseJson(Paths.get(config.getConfigFile()), AccessControlRules.class);
-        checkArgument(!rules.hasRoleRules(), "File connector access control does not support role rules: %s", config.getConfigFile());
+        AccessControlRules rules = parseJson(configFile.toPath(), AccessControlRules.class);
+        checkArgument(!rules.hasRoleRules(), "File connector access control does not support role rules: %s", configFile);
 
         this.schemaRules = rules.getSchemaRules();
         this.tableRules = rules.getTableRules();
@@ -180,15 +183,6 @@ public class FileBasedAccessControl
     {
         if (!checkTablePermission(context, tableName, OWNERSHIP)) {
             denyShowCreateTable(tableName.toString());
-        }
-    }
-
-    @Override
-    public void checkCanCreateTable(ConnectorSecurityContext context, SchemaTableName tableName)
-    {
-        // check if user will be an owner of the table after creation
-        if (!checkTablePermission(context, tableName, OWNERSHIP)) {
-            denyCreateTable(tableName.toString());
         }
     }
 
@@ -270,7 +264,7 @@ public class FileBasedAccessControl
     }
 
     @Override
-    public void checkCanSetTableProperties(ConnectorSecurityContext context, SchemaTableName tableName, Map<String, Object> properties)
+    public void checkCanSetTableProperties(ConnectorSecurityContext context, SchemaTableName tableName, Map<String, Optional<Object>> properties)
     {
         if (!checkTablePermission(context, tableName, OWNERSHIP)) {
             denySetTableProperties(tableName.toString());
@@ -430,7 +424,7 @@ public class FileBasedAccessControl
     }
 
     @Override
-    public void checkCanCreateMaterializedView(ConnectorSecurityContext context, SchemaTableName materializedViewName)
+    public void checkCanCreateMaterializedView(ConnectorSecurityContext context, SchemaTableName materializedViewName, Map<String, Object> properties)
     {
         // check if user will be an owner of the view after creation
         if (!checkTablePermission(context, materializedViewName, OWNERSHIP)) {
@@ -464,6 +458,14 @@ public class FileBasedAccessControl
     }
 
     @Override
+    public void checkCanSetMaterializedViewProperties(ConnectorSecurityContext context, SchemaTableName materializedViewName, Map<String, Optional<Object>> properties)
+    {
+        if (!checkTablePermission(context, materializedViewName, OWNERSHIP)) {
+            denySetMaterializedViewProperties(materializedViewName.toString());
+        }
+    }
+
+    @Override
     public void checkCanSetCatalogSessionProperty(ConnectorSecurityContext context, String propertyName)
     {
         if (!canSetSessionProperty(context, propertyName)) {
@@ -480,6 +482,14 @@ public class FileBasedAccessControl
     }
 
     @Override
+    public void checkCanDenySchemaPrivilege(ConnectorSecurityContext context, Privilege privilege, String schemaName, TrinoPrincipal grantee)
+    {
+        if (!isSchemaOwner(context, schemaName)) {
+            denyDenySchemaPrivilege(privilege.name(), schemaName);
+        }
+    }
+
+    @Override
     public void checkCanRevokeSchemaPrivilege(ConnectorSecurityContext context, Privilege privilege, String schemaName, TrinoPrincipal revokee, boolean grantOption)
     {
         if (!isSchemaOwner(context, schemaName)) {
@@ -492,6 +502,13 @@ public class FileBasedAccessControl
     {
         // file based rules are immutable
         denyGrantTablePrivilege(privilege.toString(), tableName.toString());
+    }
+
+    @Override
+    public void checkCanDenyTablePrivilege(ConnectorSecurityContext context, Privilege privilege, SchemaTableName tableName, TrinoPrincipal grantee)
+    {
+        // file based rules are immutable
+        denyDenyTablePrivilege(privilege.toString(), tableName.toString());
     }
 
     @Override

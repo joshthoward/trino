@@ -12,7 +12,7 @@ Requirements
 
 To connect to PostgreSQL, you need:
 
-* PostgreSQL 9.6 or higher.
+* PostgreSQL 10.x or higher.
 * Network access from the Trino coordinator and workers to PostgreSQL.
   Port 5432 is the default port.
 
@@ -46,6 +46,27 @@ determine the user credentials for the connection, often a service user. You can
 use :doc:`secrets </security/secrets>` to avoid actual values in the catalog
 properties files.
 
+.. _postgresql-tls:
+
+Connection security
+^^^^^^^^^^^^^^^^^^^
+
+If you have TLS configured with a globally-trusted certificate installed on your
+data source, you can enable TLS between your cluster and the data
+source by appending a parameter to the JDBC connection string set in the
+``connection-url`` catalog configuration property.
+
+For example, with version 42 of the PostgreSQL JDBC driver, enable TLS by
+appending the ``ssl=true`` parameter to the ``connection-url`` configuration
+property:
+
+.. code-block:: properties
+
+  connection-url=jdbc:postgresql://example.net:5432/database?ssl=true
+
+For more information on TLS configuration options, see the `PostgreSQL JDBC
+driver documentation <https://jdbc.postgresql.org/documentation/head/connect.html>`_.
+
 Multiple PostgreSQL databases or servers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -60,6 +81,8 @@ if you name the property file ``sales.properties``, Trino creates a
 catalog named ``sales`` using the configured connector.
 
 .. include:: jdbc-common-configurations.fragment
+
+.. include:: jdbc-procedures.fragment
 
 .. include:: jdbc-case-insensitive-matching.fragment
 
@@ -143,6 +166,8 @@ statements, the connector supports the following features:
 .. include:: sql-delete-limitation.fragment
 
 .. include:: alter-table-limitation.fragment
+
+.. include:: alter-schema-limitation.fragment
 
 .. _postgresql-pushdown:
 

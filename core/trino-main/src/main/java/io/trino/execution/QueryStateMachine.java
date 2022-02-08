@@ -58,8 +58,9 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -118,7 +119,6 @@ public class QueryStateMachine
 
     private final AtomicLong currentRevocableMemory = new AtomicLong();
     private final AtomicLong peakRevocableMemory = new AtomicLong();
-    private final AtomicLong peakNonRevocableMemory = new AtomicLong();
 
     // peak of the user + system + revocable memory reservation
     private final AtomicLong currentTotalMemory = new AtomicLong();
@@ -200,6 +200,7 @@ public class QueryStateMachine
      * Created QueryStateMachines must be transitioned to terminal states to clean up resources.
      */
     public static QueryStateMachine begin(
+            Optional<TransactionId> existingTransactionId,
             String query,
             Optional<String> preparedQuery,
             Session session,
@@ -214,6 +215,7 @@ public class QueryStateMachine
             Optional<QueryType> queryType)
     {
         return beginWithTicker(
+                existingTransactionId,
                 query,
                 preparedQuery,
                 session,
@@ -230,6 +232,7 @@ public class QueryStateMachine
     }
 
     static QueryStateMachine beginWithTicker(
+            Optional<TransactionId> existingTransactionId,
             String query,
             Optional<String> preparedQuery,
             Session session,
@@ -244,10 +247,22 @@ public class QueryStateMachine
             WarningCollector warningCollector,
             Optional<QueryType> queryType)
     {
-        // If there is not an existing transaction, begin an auto commit transaction
-        if (session.getTransactionId().isEmpty() && !transactionControl) {
+        // if there is an existing transaction, activate it
+        existingTransactionId.ifPresent(transactionId -> {
+            if (transactionControl) {
+                transactionManager.trySetActive(transactionId);
+            }
+            else {
+                transactionManager.checkAndSetActive(transactionId);
+            }
+        });
+
+        // add the session to the existing transaction, or create a new auto commit transaction for the session
+        // NOTE: for the start transaction command, no transaction is created
+        if (existingTransactionId.isPresent() || !transactionControl) {
             // TODO: make autocommit isolation level a session parameter
-            TransactionId transactionId = transactionManager.beginTransaction(true);
+            TransactionId transactionId = existingTransactionId
+                    .orElseGet(() -> transactionManager.beginTransaction(true));
             session = session.beginTransactionId(transactionId, transactionManager, accessControl);
         }
 
@@ -263,7 +278,12 @@ public class QueryStateMachine
                 metadata,
                 warningCollector,
                 queryType);
-        queryStateMachine.addStateChangeListener(newState -> QUERY_STATE_LOG.debug("Query %s is %s", queryStateMachine.getQueryId(), newState));
+        queryStateMachine.addStateChangeListener(newState -> {
+            QUERY_STATE_LOG.debug("Query %s is %s", queryStateMachine.getQueryId(), newState);
+            if (newState.isDone()) {
+                queryStateMachine.getSession().getTransactionId().ifPresent(transactionManager::trySetInactive);
+            }
+        });
 
         return queryStateMachine;
     }
@@ -286,11 +306,6 @@ public class QueryStateMachine
     public long getPeakRevocableMemoryInBytes()
     {
         return peakRevocableMemory.get();
-    }
-
-    public long getPeakNonRevocableMemoryInBytes()
-    {
-        return peakNonRevocableMemory.get();
     }
 
     public long getPeakTotalMemoryInBytes()
@@ -331,7 +346,6 @@ public class QueryStateMachine
         currentTotalMemory.addAndGet(deltaTotalMemoryInBytes);
         peakUserMemory.updateAndGet(currentPeakValue -> Math.max(currentUserMemory.get(), currentPeakValue));
         peakRevocableMemory.updateAndGet(currentPeakValue -> Math.max(currentRevocableMemory.get(), currentPeakValue));
-        peakNonRevocableMemory.updateAndGet(currentPeakValue -> Math.max(currentTotalMemory.get() - currentRevocableMemory.get(), currentPeakValue));
         peakTotalMemory.updateAndGet(currentPeakValue -> Math.max(currentTotalMemory.get(), currentPeakValue));
         peakTaskUserMemory.accumulateAndGet(taskUserMemoryInBytes, Math::max);
         peakTaskRevocableMemory.accumulateAndGet(taskRevocableMemoryInBytes, Math::max);
@@ -372,7 +386,6 @@ public class QueryStateMachine
                 stageStats.getPhysicalInputDataSize(),
 
                 stageStats.getCumulativeUserMemory(),
-                stageStats.getCumulativeSystemMemory(),
                 stageStats.getUserMemoryReservation(),
                 stageStats.getTotalMemoryReservation(),
                 succinctBytes(getPeakUserMemoryInBytes()),
@@ -471,7 +484,6 @@ public class QueryStateMachine
         int completedDrivers = 0;
 
         long cumulativeUserMemory = 0;
-        long cumulativeSystemMemory = 0;
         long userMemoryReservation = 0;
         long revocableMemoryReservation = 0;
         long totalMemoryReservation = 0;
@@ -518,7 +530,6 @@ public class QueryStateMachine
             completedDrivers += stageStats.getCompletedDrivers();
 
             cumulativeUserMemory += stageStats.getCumulativeUserMemory();
-            cumulativeSystemMemory += stageStats.getCumulativeSystemMemory();
             userMemoryReservation += stageStats.getUserMemoryReservation().toBytes();
             revocableMemoryReservation += stageStats.getRevocableMemoryReservation().toBytes();
             totalMemoryReservation += stageStats.getTotalMemoryReservation().toBytes();
@@ -588,13 +599,11 @@ public class QueryStateMachine
                 completedDrivers,
 
                 cumulativeUserMemory,
-                cumulativeSystemMemory,
                 succinctBytes(userMemoryReservation),
                 succinctBytes(revocableMemoryReservation),
                 succinctBytes(totalMemoryReservation),
                 succinctBytes(getPeakUserMemoryInBytes()),
                 succinctBytes(getPeakRevocableMemoryInBytes()),
-                succinctBytes(getPeakNonRevocableMemoryInBytes()),
                 succinctBytes(getPeakTotalMemoryInBytes()),
                 succinctBytes(getPeakTaskUserMemory()),
                 succinctBytes(getPeakTaskRevocableMemory()),
@@ -644,12 +653,22 @@ public class QueryStateMachine
         outputManager.addOutputInfoListener(listener);
     }
 
+    public void addOutputTaskFailureListener(TaskFailureListener listener)
+    {
+        outputManager.addOutputTaskFailureListener(listener);
+    }
+
+    public void outputTaskFailed(TaskId taskId, Throwable failure)
+    {
+        outputManager.outputTaskFailed(taskId, failure);
+    }
+
     public void setColumns(List<String> columnNames, List<Type> columnTypes)
     {
         outputManager.setColumns(columnNames, columnTypes);
     }
 
-    public void updateOutputLocations(Set<URI> newExchangeLocations, boolean noMoreExchangeLocations)
+    public void updateOutputLocations(Map<TaskId, URI> newExchangeLocations, boolean noMoreExchangeLocations)
     {
         outputManager.updateOutputLocations(newExchangeLocations, noMoreExchangeLocations);
     }
@@ -1037,7 +1056,7 @@ public class QueryStateMachine
         }
         return getAllStages(rootStage).stream()
                 .map(StageInfo::getState)
-                .allMatch(state -> state == StageState.RUNNING || state == StageState.FLUSHING || state.isDone());
+                .allMatch(state -> state == StageState.RUNNING || state == StageState.PENDING || state.isDone());
     }
 
     public Optional<ExecutionFailureInfo> getFailureInfo()
@@ -1074,6 +1093,7 @@ public class QueryStateMachine
                 outputStage.getStageId(),
                 outputStage.getState(),
                 null, // Remove the plan
+                outputStage.isCoordinatorOnly(),
                 outputStage.getTypes(),
                 outputStage.getStageStats(),
                 ImmutableList.of(), // Remove the tasks
@@ -1141,13 +1161,11 @@ public class QueryStateMachine
                 queryStats.getBlockedDrivers(),
                 queryStats.getCompletedDrivers(),
                 queryStats.getCumulativeUserMemory(),
-                queryStats.getCumulativeSystemMemory(),
                 queryStats.getUserMemoryReservation(),
                 queryStats.getRevocableMemoryReservation(),
                 queryStats.getTotalMemoryReservation(),
                 queryStats.getPeakUserMemoryReservation(),
                 queryStats.getPeakRevocableMemoryReservation(),
-                queryStats.getPeakNonRevocableMemoryReservation(),
                 queryStats.getPeakTotalMemoryReservation(),
                 queryStats.getPeakTaskUserMemory(),
                 queryStats.getPeakTaskRevocableMemory(),
@@ -1172,7 +1190,7 @@ public class QueryStateMachine
                 queryStats.getPhysicalWrittenDataSize(),
                 queryStats.getStageGcStatistics(),
                 queryStats.getDynamicFiltersStats(),
-                ImmutableList.of()); // Remove the operator summaries as OperatorInfo (especially ExchangeClientStatus) can hold onto a large amount of memory
+                ImmutableList.of()); // Remove the operator summaries as OperatorInfo (especially DirectExchangeClientStatus) can hold onto a large amount of memory
     }
 
     public static class QueryOutputManager
@@ -1187,9 +1205,14 @@ public class QueryStateMachine
         @GuardedBy("this")
         private List<Type> columnTypes;
         @GuardedBy("this")
-        private final Set<URI> exchangeLocations = new LinkedHashSet<>();
+        private final Map<TaskId, URI> exchangeLocations = new LinkedHashMap<>();
         @GuardedBy("this")
         private boolean noMoreExchangeLocations;
+
+        @GuardedBy("this")
+        private final Map<TaskId, Throwable> outputTaskFailures = new HashMap<>();
+        @GuardedBy("this")
+        private final List<TaskFailureListener> outputTaskFailureListeners = new ArrayList<>();
 
         public QueryOutputManager(Executor executor)
         {
@@ -1227,7 +1250,7 @@ public class QueryStateMachine
             queryOutputInfo.ifPresent(info -> fireStateChanged(info, outputInfoListeners));
         }
 
-        public void updateOutputLocations(Set<URI> newExchangeLocations, boolean noMoreExchangeLocations)
+        public void updateOutputLocations(Map<TaskId, URI> newExchangeLocations, boolean noMoreExchangeLocations)
         {
             requireNonNull(newExchangeLocations, "newExchangeLocations is null");
 
@@ -1235,16 +1258,42 @@ public class QueryStateMachine
             List<Consumer<QueryOutputInfo>> outputInfoListeners;
             synchronized (this) {
                 if (this.noMoreExchangeLocations) {
-                    checkArgument(this.exchangeLocations.containsAll(newExchangeLocations), "New locations added after no more locations set");
+                    checkArgument(this.exchangeLocations.entrySet().containsAll(newExchangeLocations.entrySet()), "New locations added after no more locations set");
                     return;
                 }
 
-                this.exchangeLocations.addAll(newExchangeLocations);
+                this.exchangeLocations.putAll(newExchangeLocations);
                 this.noMoreExchangeLocations = noMoreExchangeLocations;
                 queryOutputInfo = getQueryOutputInfo();
                 outputInfoListeners = ImmutableList.copyOf(this.outputInfoListeners);
             }
             queryOutputInfo.ifPresent(info -> fireStateChanged(info, outputInfoListeners));
+        }
+
+        public void addOutputTaskFailureListener(TaskFailureListener listener)
+        {
+            Map<TaskId, Throwable> failures;
+            synchronized (this) {
+                outputTaskFailureListeners.add(listener);
+                failures = ImmutableMap.copyOf(outputTaskFailures);
+            }
+            executor.execute(() -> {
+                failures.forEach(listener::onTaskFailed);
+            });
+        }
+
+        public void outputTaskFailed(TaskId taskId, Throwable failure)
+        {
+            List<TaskFailureListener> listeners;
+            synchronized (this) {
+                outputTaskFailures.putIfAbsent(taskId, failure);
+                listeners = ImmutableList.copyOf(outputTaskFailureListeners);
+            }
+            executor.execute(() -> {
+                for (TaskFailureListener listener : listeners) {
+                    listener.onTaskFailed(taskId, failure);
+                }
+            });
         }
 
         private synchronized Optional<QueryOutputInfo> getQueryOutputInfo()

@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableMap;
 import io.airlift.stats.TestingGcMonitor;
 import io.airlift.units.DataSize;
 import io.trino.Session;
+import io.trino.execution.StageId;
 import io.trino.execution.TaskId;
 import io.trino.execution.TaskStateMachine;
 import io.trino.memory.MemoryPool;
@@ -72,7 +73,7 @@ public class MemoryLocalQueryRunner
         QueryContext queryContext = new QueryContext(
                 new QueryId("test"),
                 DataSize.of(1, GIGABYTE),
-                DataSize.of(2, GIGABYTE),
+                Optional.empty(),
                 memoryPool,
                 new TestingGcMonitor(),
                 localQueryRunner.getExecutor(),
@@ -81,7 +82,7 @@ public class MemoryLocalQueryRunner
                 spillSpaceTracker);
 
         TaskContext taskContext = queryContext
-                .addTaskContext(new TaskStateMachine(new TaskId("query", 0, 0), localQueryRunner.getExecutor()),
+                .addTaskContext(new TaskStateMachine(new TaskId(new StageId("query", 0), 0, 0), localQueryRunner.getExecutor()),
                         localQueryRunner.getDefaultSession(),
                         () -> {},
                         false,

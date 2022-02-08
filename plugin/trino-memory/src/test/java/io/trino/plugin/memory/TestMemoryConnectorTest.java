@@ -74,7 +74,7 @@ public class TestMemoryConnectorTest
                         .put("dynamic-filtering.large-partitioned.range-row-limit-per-driver", "100000")
                         // disable semi join to inner join rewrite to test semi join operators explicitly
                         .put("optimizer.rewrite-filtering-semi-join-to-inner-join", "false")
-                        .build(),
+                        .buildOrThrow(),
                 ImmutableSet.<TpchTable<?>>builder()
                         .addAll(REQUIRED_TPCH_TABLES)
                         .add(TpchTable.PART)
@@ -107,7 +107,7 @@ public class TestMemoryConnectorTest
             case SUPPORTS_CREATE_VIEW:
                 return true;
 
-            case SUPPORTS_INSERT_NOT_NULL_COLUMN:
+            case SUPPORTS_NOT_NULL_CONSTRAINT:
                 return false;
 
             default:
@@ -556,7 +556,7 @@ public class TestMemoryConnectorTest
         assertUpdate("CREATE OR REPLACE VIEW test_view AS " + query);
 
         assertQueryFails("CREATE TABLE test_view (x date)", "View \\[default.test_view] already exists");
-        assertQueryFails("CREATE VIEW test_view AS SELECT 123 x", "View already exists: default.test_view");
+        assertQueryFails("CREATE VIEW test_view AS SELECT 123 x", ".*View already exists: 'memory.default.test_view'");
 
         assertQuery("SELECT * FROM test_view", query);
 

@@ -106,7 +106,7 @@ examples are equivalent:
     Connection connection = DriverManager.getConnection(url, properties);
 
     // properties
-    String url = "jdbc:trino://example.net:8080/hive/sales?user=test&password=secret&SSL=true";
+    String url = "jdbc:trino://example.net:8443/hive/sales?user=test&password=secret&SSL=true";
     Connection connection = DriverManager.getConnection(url);
 
 These methods may be mixed; some parameters may be specified in the URL,
@@ -186,9 +186,9 @@ Name                                                         Description
                                                              For example, ``abc:xyz;example.foo:bar`` sets the system property
                                                              ``abc`` to the value ``xyz`` and the ``foo`` property for
                                                              catalog ``example`` to the value ``bar``.
-``externalAuthentication``                                   Use a local web browser to authenticate with an identity provider (IdP)
-                                                             that has been configured for the Trino coordinator.
-                                                             See :doc:`/security/oauth2` for more details.
+``externalAuthentication``                                   Set to true if you want to use external authentication via
+                                                             :doc:`/security/oauth2`. Use a local web browser to authenticate with an
+                                                             identity provider (IdP) that has been configured for the Trino coordinator.
 ``externalAuthenticationTokenCache``                         Allows the sharing of external authentication tokens between different
                                                              connections for the same authenticated user until the cache is
                                                              invalidated, such as when a client is restarted or when the classloader

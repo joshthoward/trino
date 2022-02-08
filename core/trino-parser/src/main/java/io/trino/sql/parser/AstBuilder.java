@@ -58,6 +58,7 @@ import io.trino.sql.tree.DateTimeDataType;
 import io.trino.sql.tree.Deallocate;
 import io.trino.sql.tree.DecimalLiteral;
 import io.trino.sql.tree.Delete;
+import io.trino.sql.tree.Deny;
 import io.trino.sql.tree.DereferenceExpression;
 import io.trino.sql.tree.DescribeInput;
 import io.trino.sql.tree.DescribeOutput;
@@ -727,6 +728,16 @@ class AstBuilder
     }
 
     @Override
+    public Node visitSetMaterializedViewProperties(SqlBaseParser.SetMaterializedViewPropertiesContext context)
+    {
+        return new SetProperties(
+                getLocation(context),
+                SetProperties.Type.MATERIALIZED_VIEW,
+                getQualifiedName(context.qualifiedName()),
+                visit(context.propertyAssignments().property(), Property.class));
+    }
+
+    @Override
     public Node visitStartTransaction(SqlBaseParser.StartTransactionContext context)
     {
         return new StartTransaction(visit(context.transactionMode(), TransactionMode.class));
@@ -834,7 +845,14 @@ class AstBuilder
     @Override
     public Node visitProperty(SqlBaseParser.PropertyContext context)
     {
-        return new Property(getLocation(context), (Identifier) visit(context.identifier()), (Expression) visit(context.expression()));
+        NodeLocation location = getLocation(context);
+        Identifier name = (Identifier) visit(context.identifier());
+        SqlBaseParser.PropertyValueContext valueContext = context.propertyValue();
+        if (valueContext instanceof SqlBaseParser.DefaultPropertyValueContext) {
+            return new Property(location, name);
+        }
+        Expression value = (Expression) visit(((SqlBaseParser.NonDefaultPropertyValueContext) valueContext).expression());
+        return new Property(location, name, value);
     }
 
     // ********************** query expressions ********************
@@ -1362,6 +1380,38 @@ class AstBuilder
                 getQualifiedName(context.qualifiedName()),
                 getPrincipalSpecification(context.grantee),
                 context.OPTION() != null);
+    }
+
+    @Override
+    public Node visitDeny(SqlBaseParser.DenyContext context)
+    {
+        Optional<List<String>> privileges;
+        if (context.ALL() != null) {
+            privileges = Optional.empty();
+        }
+        else {
+            privileges = Optional.of(context.privilege().stream()
+                    .map(SqlBaseParser.PrivilegeContext::getText)
+                    .collect(toList()));
+        }
+
+        Optional<GrantOnType> type;
+        if (context.SCHEMA() != null) {
+            type = Optional.of(GrantOnType.SCHEMA);
+        }
+        else if (context.TABLE() != null) {
+            type = Optional.of(GrantOnType.TABLE);
+        }
+        else {
+            type = Optional.empty();
+        }
+
+        return new Deny(
+                getLocation(context),
+                privileges,
+                type,
+                getQualifiedName(context.qualifiedName()),
+                getPrincipalSpecification(context.grantee));
     }
 
     @Override

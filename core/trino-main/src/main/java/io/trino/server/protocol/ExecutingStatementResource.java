@@ -24,9 +24,7 @@ import io.trino.Session;
 import io.trino.client.ProtocolHeaders;
 import io.trino.client.QueryResults;
 import io.trino.execution.QueryManager;
-import io.trino.memory.context.SimpleLocalMemoryContext;
-import io.trino.operator.ExchangeClient;
-import io.trino.operator.ExchangeClientSupplier;
+import io.trino.operator.DirectExchangeClientSupplier;
 import io.trino.server.ForStatementResource;
 import io.trino.server.ServerConfig;
 import io.trino.server.security.ResourceSecurity;
@@ -61,7 +59,6 @@ import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.concurrent.Threads.threadsNamed;
 import static io.airlift.jaxrs.AsyncResponseHandler.bindAsyncResponse;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
-import static io.trino.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
 import static io.trino.server.protocol.Slug.Context.EXECUTING_QUERY;
 import static io.trino.server.security.ResourceSecurity.AccessType.PUBLIC;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -83,7 +80,7 @@ public class ExecutingStatementResource
     private static final DataSize MAX_TARGET_RESULT_SIZE = DataSize.of(128, MEGABYTE);
 
     private final QueryManager queryManager;
-    private final ExchangeClientSupplier exchangeClientSupplier;
+    private final DirectExchangeClientSupplier directExchangeClientSupplier;
     private final BlockEncodingSerde blockEncodingSerde;
     private final QueryInfoUrlFactory queryInfoUrlFactory;
     private final BoundedExecutor responseExecutor;
@@ -96,7 +93,7 @@ public class ExecutingStatementResource
     @Inject
     public ExecutingStatementResource(
             QueryManager queryManager,
-            ExchangeClientSupplier exchangeClientSupplier,
+            DirectExchangeClientSupplier directExchangeClientSupplier,
             BlockEncodingSerde blockEncodingSerde,
             QueryInfoUrlFactory queryInfoUrlTemplate,
             @ForStatementResource BoundedExecutor responseExecutor,
@@ -104,7 +101,7 @@ public class ExecutingStatementResource
             ServerConfig serverConfig)
     {
         this.queryManager = requireNonNull(queryManager, "queryManager is null");
-        this.exchangeClientSupplier = requireNonNull(exchangeClientSupplier, "exchangeClientSupplier is null");
+        this.directExchangeClientSupplier = requireNonNull(directExchangeClientSupplier, "directExchangeClientSupplier is null");
         this.blockEncodingSerde = requireNonNull(blockEncodingSerde, "blockEncodingSerde is null");
         this.queryInfoUrlFactory = requireNonNull(queryInfoUrlTemplate, "queryInfoUrlTemplate is null");
         this.responseExecutor = requireNonNull(responseExecutor, "responseExecutor is null");
@@ -181,18 +178,15 @@ public class ExecutingStatementResource
             throw queryNotFound();
         }
 
-        query = queries.computeIfAbsent(queryId, id -> {
-            ExchangeClient exchangeClient = exchangeClientSupplier.get(new SimpleLocalMemoryContext(newSimpleAggregatedMemoryContext(), ExecutingStatementResource.class.getSimpleName()));
-            return Query.create(
-                    session,
-                    querySlug,
-                    queryManager,
-                    queryInfoUrlFactory.getQueryInfoUrl(queryId),
-                    exchangeClient,
-                    responseExecutor,
-                    timeoutExecutor,
-                    blockEncodingSerde);
-        });
+        query = queries.computeIfAbsent(queryId, id -> Query.create(
+                session,
+                querySlug,
+                queryManager,
+                queryInfoUrlFactory.getQueryInfoUrl(queryId),
+                directExchangeClientSupplier,
+                responseExecutor,
+                timeoutExecutor,
+                blockEncodingSerde));
         return query;
     }
 

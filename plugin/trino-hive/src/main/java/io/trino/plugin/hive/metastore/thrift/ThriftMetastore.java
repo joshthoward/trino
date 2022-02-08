@@ -48,7 +48,7 @@ public interface ThriftMetastore
 {
     void createDatabase(HiveIdentity identity, Database database);
 
-    void dropDatabase(HiveIdentity identity, String databaseName);
+    void dropDatabase(HiveIdentity identity, String databaseName, boolean deleteData);
 
     void alterDatabase(HiveIdentity identity, String databaseName, Database database);
 
@@ -140,6 +140,11 @@ public interface ThriftMetastore
     }
 
     default void commitTransaction(HiveIdentity identity, long transactionId)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    default void abortTransaction(HiveIdentity identity, long transactionId)
     {
         throw new UnsupportedOperationException();
     }

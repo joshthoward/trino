@@ -14,15 +14,18 @@
 package io.trino.operator.aggregation.minmaxby;
 
 import com.google.common.collect.ImmutableList;
+import io.trino.FeaturesConfig;
 import io.trino.metadata.TestingFunctionResolution;
+import io.trino.metadata.TypeRegistry;
 import io.trino.spi.type.ArrayType;
 import io.trino.spi.type.RowType;
-import io.trino.spi.type.SqlDecimal;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.TypeOperators;
 import io.trino.sql.analyzer.TypeSignatureProvider;
 import io.trino.sql.tree.QualifiedName;
 import org.testng.annotations.Test;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -43,6 +46,7 @@ import static io.trino.spi.type.DecimalType.createDecimalType;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
+import static io.trino.spi.type.SqlDecimal.decimal;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static io.trino.type.UnknownType.UNKNOWN;
@@ -52,6 +56,7 @@ import static org.testng.Assert.assertNotNull;
 public class TestMinMaxByAggregation
 {
     private static final TestingFunctionResolution FUNCTION_RESOLUTION = new TestingFunctionResolution();
+    private static final Collection<Type> STANDARD_TYPES = new TypeRegistry(new TypeOperators(), new FeaturesConfig()).getTypes();
 
     @Test
     public void testAllRegistered()
@@ -71,7 +76,7 @@ public class TestMinMaxByAggregation
     private static List<Type> getTypes()
     {
         return new ImmutableList.Builder<Type>()
-                .addAll(FUNCTION_RESOLUTION.getMetadata().getTypes())
+                .addAll(STANDARD_TYPES)
                 .add(VARCHAR)
                 .add(createDecimalType(1))
                 .add(RowType.anonymous(ImmutableList.of(BIGINT, VARCHAR, DOUBLE)))
@@ -469,7 +474,7 @@ public class TestMinMaxByAggregation
                 FUNCTION_RESOLUTION,
                 QualifiedName.of("min_by"),
                 parameterTypes,
-                SqlDecimal.of("2.2"),
+                decimal("2.2", createDecimalType(19, 1)),
                 createLongDecimalsBlock("1.1", "2.2", "3.3"),
                 createLongDecimalsBlock("1.2", "1.0", "2.0"));
     }
@@ -482,7 +487,7 @@ public class TestMinMaxByAggregation
                 FUNCTION_RESOLUTION,
                 QualifiedName.of("max_by"),
                 parameterTypes,
-                SqlDecimal.of("3.3"),
+                decimal("3.3", createDecimalType(19, 1)),
                 createLongDecimalsBlock("1.1", "2.2", "3.3", "4.4"),
                 createLongDecimalsBlock("1.2", "1.0", "2.0", "1.5"));
     }
@@ -495,7 +500,7 @@ public class TestMinMaxByAggregation
                 FUNCTION_RESOLUTION,
                 QualifiedName.of("min_by"),
                 parameterTypes,
-                SqlDecimal.of("2.2"),
+                decimal("2.2", createDecimalType(10, 1)),
                 createShortDecimalsBlock("1.1", "2.2", "3.3"),
                 createShortDecimalsBlock("1.2", "1.0", "2.0"));
     }
@@ -508,7 +513,7 @@ public class TestMinMaxByAggregation
                 FUNCTION_RESOLUTION,
                 QualifiedName.of("max_by"),
                 parameterTypes,
-                SqlDecimal.of("3.3"),
+                decimal("3.3", createDecimalType(10, 1)),
                 createShortDecimalsBlock("1.1", "2.2", "3.3", "4.4"),
                 createShortDecimalsBlock("1.2", "1.0", "2.0", "1.5"));
     }

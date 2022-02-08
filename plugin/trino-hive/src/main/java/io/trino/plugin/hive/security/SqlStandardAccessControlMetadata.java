@@ -16,7 +16,6 @@ package io.trino.plugin.hive.security;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import io.trino.plugin.hive.HiveViewNotSupportedException;
-import io.trino.plugin.hive.authentication.HiveIdentity;
 import io.trino.plugin.hive.metastore.HivePrincipal;
 import io.trino.plugin.hive.metastore.HivePrivilegeInfo;
 import io.trino.plugin.hive.metastore.thrift.ThriftMetastoreUtil;
@@ -42,6 +41,7 @@ import static io.trino.spi.security.PrincipalType.ROLE;
 import static io.trino.spi.security.PrincipalType.USER;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
+import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toSet;
 
 public class SqlStandardAccessControlMetadata
@@ -174,8 +174,14 @@ public class SqlStandardAccessControlMetadata
         String schemaName = schemaTableName.getSchemaName();
         String tableName = schemaTableName.getTableName();
 
+        // Hive does not support the CREATE privilege, so ignore. Normally we would throw
+        // an error for this, but when the Trino engine sees ALL_PRIVILEGES, it sends the
+        // enumerated list of privileges instead of an Optional.empty
+        privileges = privileges.stream()
+                .filter(not(Privilege.CREATE::equals))
+                .collect(toImmutableSet());
+
         metastore.grantTablePrivileges(
-                new HiveIdentity(session),
                 schemaName,
                 tableName,
                 grantee,
@@ -192,8 +198,14 @@ public class SqlStandardAccessControlMetadata
         String schemaName = schemaTableName.getSchemaName();
         String tableName = schemaTableName.getTableName();
 
+        // Hive does not support the CREATE privilege, so ignore. Normally we would throw
+        // an error for this, but when the Trino engine sees ALL_PRIVILEGES, it sends the
+        // enumerated list of privileges instead of an Optional.empty
+        privileges = privileges.stream()
+                .filter(not(Privilege.CREATE::equals))
+                .collect(toImmutableSet());
+
         metastore.revokeTablePrivileges(
-                new HiveIdentity(session),
                 schemaName,
                 tableName,
                 grantee,
@@ -213,7 +225,7 @@ public class SqlStandardAccessControlMetadata
         ImmutableList.Builder<GrantInfo> result = ImmutableList.builder();
         for (SchemaTableName tableName : tableNames) {
             try {
-                result.addAll(buildGrants(session, principals, isAdminRoleSet, tableName));
+                result.addAll(buildGrants(principals, isAdminRoleSet, tableName));
             }
             catch (TableNotFoundException e) {
                 // table disappeared during listing operation
@@ -225,22 +237,22 @@ public class SqlStandardAccessControlMetadata
         return result.build();
     }
 
-    private List<GrantInfo> buildGrants(ConnectorSession session, Set<HivePrincipal> principals, boolean isAdminRoleSet, SchemaTableName tableName)
+    private List<GrantInfo> buildGrants(Set<HivePrincipal> principals, boolean isAdminRoleSet, SchemaTableName tableName)
     {
         if (isAdminRoleSet) {
-            return buildGrants(session, tableName, Optional.empty());
+            return buildGrants(tableName, Optional.empty());
         }
         ImmutableList.Builder<GrantInfo> result = ImmutableList.builder();
         for (HivePrincipal grantee : principals) {
-            result.addAll(buildGrants(session, tableName, Optional.of(grantee)));
+            result.addAll(buildGrants(tableName, Optional.of(grantee)));
         }
         return result.build();
     }
 
-    private List<GrantInfo> buildGrants(ConnectorSession session, SchemaTableName tableName, Optional<HivePrincipal> principal)
+    private List<GrantInfo> buildGrants(SchemaTableName tableName, Optional<HivePrincipal> principal)
     {
         ImmutableList.Builder<GrantInfo> result = ImmutableList.builder();
-        Set<HivePrivilegeInfo> hivePrivileges = metastore.listTablePrivileges(new HiveIdentity(session), tableName.getSchemaName(), tableName.getTableName(), principal);
+        Set<HivePrivilegeInfo> hivePrivileges = metastore.listTablePrivileges(tableName.getSchemaName(), tableName.getTableName(), principal);
         for (HivePrivilegeInfo hivePrivilege : hivePrivileges) {
             Set<PrivilegeInfo> prestoPrivileges = hivePrivilege.toPrivilegeInfo();
             for (PrivilegeInfo prestoPrivilege : prestoPrivileges) {

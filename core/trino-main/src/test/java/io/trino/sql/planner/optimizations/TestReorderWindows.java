@@ -18,7 +18,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.trino.spi.connector.SortOrder;
 import io.trino.sql.planner.RuleStatsRecorder;
-import io.trino.sql.planner.TypeAnalyzer;
 import io.trino.sql.planner.assertions.BasePlanTest;
 import io.trino.sql.planner.assertions.ExpectedValueProvider;
 import io.trino.sql.planner.assertions.PlanMatchPattern;
@@ -35,6 +34,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static io.trino.sql.planner.PlanOptimizers.columnPruningRules;
+import static io.trino.sql.planner.TypeAnalyzer.createTestingTypeAnalyzer;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.anyTree;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.expression;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.filter;
@@ -79,7 +79,7 @@ public class TestReorderWindows
         columns.put(SHIPDATE_ALIAS, "shipdate");
         columns.put(SUPPKEY_ALIAS, "suppkey");
         columns.put(TAX_ALIAS, "tax");
-        LINEITEM_TABLESCAN_DOQPRSST = tableScan("lineitem", columns.build());
+        LINEITEM_TABLESCAN_DOQPRSST = tableScan("lineitem", columns.buildOrThrow());
 
         columns = ImmutableMap.builder();
         columns.put(DISCOUNT_ALIAS, "discount");
@@ -88,7 +88,7 @@ public class TestReorderWindows
         columns.put(RECEIPTDATE_ALIAS, "receiptdate");
         columns.put(SUPPKEY_ALIAS, "suppkey");
         columns.put(TAX_ALIAS, "tax");
-        LINEITEM_TABLESCAN_DOQRST = tableScan("lineitem", columns.build());
+        LINEITEM_TABLESCAN_DOQRST = tableScan("lineitem", columns.buildOrThrow());
 
         commonFrame = Optional.empty();
 
@@ -335,9 +335,8 @@ public class TestReorderWindows
         List<PlanOptimizer> optimizers = ImmutableList.of(
                 new UnaliasSymbolReferences(getQueryRunner().getMetadata()),
                 new PredicatePushDown(
-                        getQueryRunner().getMetadata(),
-                        getQueryRunner().getTypeOperators(),
-                        new TypeAnalyzer(getQueryRunner().getSqlParser(), getQueryRunner().getMetadata()),
+                        getQueryRunner().getPlannerContext(),
+                        createTestingTypeAnalyzer(getQueryRunner().getPlannerContext()),
                         false,
                         false),
                 new IterativeOptimizer(

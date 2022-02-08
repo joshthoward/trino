@@ -33,6 +33,7 @@ import io.trino.sql.tree.CreateTableAsSelect;
 import io.trino.sql.tree.CreateView;
 import io.trino.sql.tree.Deallocate;
 import io.trino.sql.tree.Delete;
+import io.trino.sql.tree.Deny;
 import io.trino.sql.tree.DescribeInput;
 import io.trino.sql.tree.DescribeOutput;
 import io.trino.sql.tree.DropColumn;
@@ -1224,7 +1225,7 @@ public final class SqlFormatter
             String propertyList = properties.stream()
                     .map(element -> INDENT +
                             formatExpression(element.getName()) + " = " +
-                            formatExpression(element.getValue()))
+                            (element.isSetToDefault() ? "DEFAULT" : formatExpression(element.getNonDefaultValue())))
                     .collect(joining(",\n"));
 
             return "\nWITH (\n" + propertyList + "\n)";
@@ -1309,10 +1310,21 @@ public final class SqlFormatter
         @Override
         protected Void visitSetProperties(SetProperties node, Integer context)
         {
-            builder.append("ALTER TABLE ");
-            builder.append(node.getName())
-                    .append(" SET PROPERTIES ");
-            builder.append(joinProperties(node.getProperties()));
+            SetProperties.Type type = node.getType();
+            builder.append("ALTER ");
+            switch (type) {
+                case TABLE:
+                    builder.append("TABLE ");
+                    break;
+                case MATERIALIZED_VIEW:
+                    builder.append("MATERIALIZED VIEW ");
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unsupported SetProperties.Type: " + type);
+            }
+            builder.append(formatName(node.getName()))
+                    .append(" SET PROPERTIES ")
+                    .append(joinProperties(node.getProperties()));
 
             return null;
         }
@@ -1321,7 +1333,7 @@ public final class SqlFormatter
         {
             return properties.stream()
                     .map(element -> formatExpression(element.getName()) + " = " +
-                            formatExpression(element.getValue()))
+                            (element.isSetToDefault() ? "DEFAULT" : formatExpression(element.getNonDefaultValue())))
                     .collect(joining(", "));
         }
 
@@ -1719,6 +1731,30 @@ public final class SqlFormatter
             if (node.isWithGrantOption()) {
                 builder.append(" WITH GRANT OPTION");
             }
+
+            return null;
+        }
+
+        @Override
+        public Void visitDeny(Deny node, Integer indent)
+        {
+            builder.append("DENY ");
+
+            if (node.getPrivileges().isPresent()) {
+                builder.append(String.join(", ", node.getPrivileges().get()));
+            }
+            else {
+                builder.append("ALL PRIVILEGES");
+            }
+
+            builder.append(" ON ");
+            if (node.getType().isPresent()) {
+                builder.append(node.getType().get());
+                builder.append(" ");
+            }
+            builder.append(formatName(node.getName()))
+                    .append(" TO ")
+                    .append(formatPrincipal(node.getGrantee()));
 
             return null;
         }

@@ -15,6 +15,7 @@ package io.trino.sql.planner.iterative.rule;
 
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import io.trino.Session;
 import io.trino.cost.StatsProvider;
 import io.trino.matching.Capture;
@@ -22,14 +23,14 @@ import io.trino.matching.Captures;
 import io.trino.matching.Pattern;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.TableHandle;
-import io.trino.metadata.TableLayoutResult;
 import io.trino.metadata.TableProperties;
 import io.trino.metadata.TableProperties.TablePartitioning;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
+import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.TupleDomain;
-import io.trino.spi.type.TypeOperators;
+import io.trino.sql.PlannerContext;
 import io.trino.sql.planner.DomainTranslator;
 import io.trino.sql.planner.LayoutConstraintEvaluator;
 import io.trino.sql.planner.Symbol;
@@ -46,11 +47,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
-import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.trino.SystemSessionProperties.isAllowPushdownIntoConnectors;
 import static io.trino.matching.Capture.newCapture;
-import static io.trino.metadata.TableLayoutResult.computeEnforced;
 import static io.trino.sql.ExpressionUtils.combineConjuncts;
 import static io.trino.sql.ExpressionUtils.filterDeterministicConjuncts;
 import static io.trino.sql.ExpressionUtils.filterNonDeterministicConjuncts;
@@ -73,14 +73,12 @@ public class PushPredicateIntoTableScan
     private static final Pattern<FilterNode> PATTERN = filter().with(source().matching(
             tableScan().capturedAs(TABLE_SCAN)));
 
-    private final Metadata metadata;
-    private final TypeOperators typeOperators;
+    private final PlannerContext plannerContext;
     private final TypeAnalyzer typeAnalyzer;
 
-    public PushPredicateIntoTableScan(Metadata metadata, TypeOperators typeOperators, TypeAnalyzer typeAnalyzer)
+    public PushPredicateIntoTableScan(PlannerContext plannerContext, TypeAnalyzer typeAnalyzer)
     {
-        this.metadata = requireNonNull(metadata, "metadata is null");
-        this.typeOperators = requireNonNull(typeOperators, "typeOperators is null");
+        this.plannerContext = requireNonNull(plannerContext, "plannerContext is null");
         this.typeAnalyzer = requireNonNull(typeAnalyzer, "typeAnalyzer is null");
     }
 
@@ -107,12 +105,10 @@ public class PushPredicateIntoTableScan
                 false,
                 context.getSession(),
                 context.getSymbolAllocator(),
-                metadata,
-                typeOperators,
+                plannerContext,
                 typeAnalyzer,
                 context.getStatsProvider(),
-                new DomainTranslator(context.getSession(),
-                metadata));
+                new DomainTranslator(plannerContext));
 
         if (rewritten.isEmpty() || arePlansSame(filterNode, tableScan, rewritten.get())) {
             return Result.empty();
@@ -148,8 +144,7 @@ public class PushPredicateIntoTableScan
             boolean pruneWithPredicateExpression,
             Session session,
             SymbolAllocator symbolAllocator,
-            Metadata metadata,
-            TypeOperators typeOperators,
+            PlannerContext plannerContext,
             TypeAnalyzer typeAnalyzer,
             StatsProvider statsProvider,
             DomainTranslator domainTranslator)
@@ -161,12 +156,11 @@ public class PushPredicateIntoTableScan
         Expression predicate = filterNode.getPredicate();
 
         // don't include non-deterministic predicates
-        Expression deterministicPredicate = filterDeterministicConjuncts(metadata, predicate);
-        Expression nonDeterministicPredicate = filterNonDeterministicConjuncts(metadata, predicate);
+        Expression deterministicPredicate = filterDeterministicConjuncts(plannerContext.getMetadata(), predicate);
+        Expression nonDeterministicPredicate = filterNonDeterministicConjuncts(plannerContext.getMetadata(), predicate);
 
-        DomainTranslator.ExtractionResult decomposedPredicate = DomainTranslator.fromPredicate(
-                metadata,
-                typeOperators,
+        DomainTranslator.ExtractionResult decomposedPredicate = DomainTranslator.getExtractionResult(
+                plannerContext,
                 session,
                 deterministicPredicate,
                 symbolAllocator.getTypes());
@@ -181,17 +175,17 @@ public class PushPredicateIntoTableScan
         // use evaluator only when there is some predicate which could not be translated into tuple domain
         if (pruneWithPredicateExpression && !TRUE_LITERAL.equals(decomposedPredicate.getRemainingExpression())) {
             LayoutConstraintEvaluator evaluator = new LayoutConstraintEvaluator(
-                    metadata,
+                    plannerContext,
                     typeAnalyzer,
                     session,
                     symbolAllocator.getTypes(),
                     node.getAssignments(),
                     combineConjuncts(
-                            metadata,
+                            plannerContext.getMetadata(),
                             deterministicPredicate,
                             // Simplify the tuple domain to avoid creating an expression with too many nodes,
                             // which would be expensive to evaluate in the call to isCandidate below.
-                            domainTranslator.toPredicate(newDomain.simplify().transformKeys(assignments::get))));
+                            domainTranslator.toPredicate(session, newDomain.simplify().transformKeys(assignments::get))));
             constraint = new Constraint(newDomain, evaluator::isCandidate, evaluator.getArguments());
         }
         else {
@@ -200,73 +194,49 @@ public class PushPredicateIntoTableScan
             constraint = new Constraint(newDomain);
         }
 
-        TableHandle newTable;
-        Optional<TablePartitioning> newTablePartitioning;
-        TupleDomain<ColumnHandle> remainingFilter;
-        boolean precalculateStatistics;
-        if (!metadata.usesLegacyTableLayouts(session, node.getTable())) {
-            // check if new domain is wider than domain already provided by table scan
-            if (constraint.predicate().isEmpty() && newDomain.contains(node.getEnforcedConstraint())) {
-                Expression resultingPredicate = createResultingPredicate(
-                        metadata,
-                        session,
-                        symbolAllocator,
-                        typeAnalyzer,
-                        TRUE_LITERAL,
-                        nonDeterministicPredicate,
-                        decomposedPredicate.getRemainingExpression());
-
-                if (!TRUE_LITERAL.equals(resultingPredicate)) {
-                    return Optional.of(new FilterNode(filterNode.getId(), node, resultingPredicate));
-                }
-
-                return Optional.of(node);
-            }
-
-            if (newDomain.isNone()) {
-                // TODO: DomainTranslator.fromPredicate can infer that the expression is "false" in some cases (TupleDomain.none()).
-                // This should move to another rule that simplifies the filter using that logic and then rely on RemoveTrivialFilters
-                // to turn the subtree into a Values node
-                return Optional.of(new ValuesNode(node.getId(), node.getOutputSymbols(), ImmutableList.of()));
-            }
-
-            Optional<ConstraintApplicationResult<TableHandle>> result = metadata.applyFilter(session, node.getTable(), constraint);
-
-            if (result.isEmpty()) {
-                return Optional.empty();
-            }
-
-            newTable = result.get().getHandle();
-
-            TableProperties newTableProperties = metadata.getTableProperties(session, newTable);
-            newTablePartitioning = newTableProperties.getTablePartitioning();
-            if (newTableProperties.getPredicate().isNone()) {
-                return Optional.of(new ValuesNode(node.getId(), node.getOutputSymbols(), ImmutableList.of()));
-            }
-
-            remainingFilter = result.get().getRemainingFilter();
-            precalculateStatistics = result.get().isPrecalculateStatistics();
-        }
-        else {
-            Optional<TableLayoutResult> layout = metadata.getLayout(
+        // check if new domain is wider than domain already provided by table scan
+        if (constraint.predicate().isEmpty() && newDomain.contains(node.getEnforcedConstraint())) {
+            Expression resultingPredicate = createResultingPredicate(
+                    plannerContext,
                     session,
-                    node.getTable(),
-                    constraint,
-                    Optional.of(node.getOutputSymbols().stream()
-                            .map(node.getAssignments()::get)
-                            .collect(toImmutableSet())));
+                    symbolAllocator,
+                    typeAnalyzer,
+                    TRUE_LITERAL,
+                    nonDeterministicPredicate,
+                    decomposedPredicate.getRemainingExpression());
 
-            if (layout.isEmpty() || layout.get().getTableProperties().getPredicate().isNone()) {
-                return Optional.of(new ValuesNode(node.getId(), node.getOutputSymbols(), ImmutableList.of()));
+            if (!TRUE_LITERAL.equals(resultingPredicate)) {
+                return Optional.of(new FilterNode(filterNode.getId(), node, resultingPredicate));
             }
 
-            newTable = layout.get().getNewTableHandle();
-            newTablePartitioning = layout.get().getTableProperties().getTablePartitioning();
-            remainingFilter = layout.get().getUnenforcedConstraint();
-            precalculateStatistics = false;
+            return Optional.of(node);
         }
 
-        verifyTablePartitioning(session, metadata, node, newTablePartitioning);
+        if (newDomain.isNone()) {
+            // TODO: DomainTranslator.fromPredicate can infer that the expression is "false" in some cases (TupleDomain.none()).
+            // This should move to another rule that simplifies the filter using that logic and then rely on RemoveTrivialFilters
+            // to turn the subtree into a Values node
+            return Optional.of(new ValuesNode(node.getId(), node.getOutputSymbols(), ImmutableList.of()));
+        }
+
+        Optional<ConstraintApplicationResult<TableHandle>> result = plannerContext.getMetadata().applyFilter(session, node.getTable(), constraint);
+
+        if (result.isEmpty()) {
+            return Optional.empty();
+        }
+
+        TableHandle newTable = result.get().getHandle();
+
+        TableProperties newTableProperties = plannerContext.getMetadata().getTableProperties(session, newTable);
+        Optional<TablePartitioning> newTablePartitioning = newTableProperties.getTablePartitioning();
+        if (newTableProperties.getPredicate().isNone()) {
+            return Optional.of(new ValuesNode(node.getId(), node.getOutputSymbols(), ImmutableList.of()));
+        }
+
+        TupleDomain<ColumnHandle> remainingFilter = result.get().getRemainingFilter();
+        boolean precalculateStatistics = result.get().isPrecalculateStatistics();
+
+        verifyTablePartitioning(session, plannerContext.getMetadata(), node, newTablePartitioning);
 
         TableScanNode tableScan = new TableScanNode(
                 node.getId(),
@@ -280,11 +250,11 @@ public class PushPredicateIntoTableScan
                 node.getUseConnectorNodePartitioning());
 
         Expression resultingPredicate = createResultingPredicate(
-                metadata,
+                plannerContext,
                 session,
                 symbolAllocator,
                 typeAnalyzer,
-                domainTranslator.toPredicate(remainingFilter.transformKeys(assignments::get)),
+                domainTranslator.toPredicate(session, remainingFilter.transformKeys(assignments::get)),
                 nonDeterministicPredicate,
                 decomposedPredicate.getRemainingExpression());
 
@@ -314,7 +284,7 @@ public class PushPredicateIntoTableScan
     }
 
     static Expression createResultingPredicate(
-            Metadata metadata,
+            PlannerContext plannerContext,
             Session session,
             SymbolAllocator symbolAllocator,
             TypeAnalyzer typeAnalyzer,
@@ -330,12 +300,45 @@ public class PushPredicateIntoTableScan
         // * Short of implementing the previous bullet point, the current order of non-deterministic expressions
         //   and non-TupleDomain-expressible expressions should be retained. Changing the order can lead
         //   to failures of previously successful queries.
-        Expression expression = combineConjuncts(metadata, unenforcedConstraints, nonDeterministicPredicate, remainingDecomposedPredicate);
+        Expression expression = combineConjuncts(plannerContext.getMetadata(), unenforcedConstraints, nonDeterministicPredicate, remainingDecomposedPredicate);
 
         // Make sure we produce an expression whose terms are consistent with the canonical form used in other optimizations
         // Otherwise, we'll end up ping-ponging among rules
-        expression = SimplifyExpressions.rewrite(expression, session, symbolAllocator, metadata, typeAnalyzer);
+        expression = SimplifyExpressions.rewrite(expression, session, symbolAllocator, plannerContext, typeAnalyzer);
 
         return expression;
+    }
+
+    public static TupleDomain<ColumnHandle> computeEnforced(TupleDomain<ColumnHandle> predicate, TupleDomain<ColumnHandle> unenforced)
+    {
+        // The engine requested the connector to apply a filter with a non-none TupleDomain.
+        // A TupleDomain is effectively a list of column-Domain pairs.
+        // The connector is expected enforce the respective domain entirely on none, some, or all of the columns.
+        // 1. When the connector could enforce none of the domains, the unenforced would be equal to predicate;
+        // 2. When the connector could enforce some of the domains, the unenforced would contain a subset of the column-Domain pairs;
+        // 3. When the connector could enforce all of the domains, the unenforced would be TupleDomain.all().
+
+        // In all 3 cases shown above, the unenforced is not TupleDomain.none().
+        checkArgument(!unenforced.isNone());
+
+        Map<ColumnHandle, Domain> predicateDomains = predicate.getDomains().get();
+        Map<ColumnHandle, Domain> unenforcedDomains = unenforced.getDomains().get();
+        ImmutableMap.Builder<ColumnHandle, Domain> enforcedDomainsBuilder = ImmutableMap.builder();
+        for (Map.Entry<ColumnHandle, Domain> entry : predicateDomains.entrySet()) {
+            ColumnHandle predicateColumnHandle = entry.getKey();
+            if (unenforcedDomains.containsKey(predicateColumnHandle)) {
+                checkArgument(
+                        entry.getValue().equals(unenforcedDomains.get(predicateColumnHandle)),
+                        "Enforced tuple domain cannot be determined. The connector is expected to enforce the respective domain entirely on none, some, or all of the column.");
+            }
+            else {
+                enforcedDomainsBuilder.put(predicateColumnHandle, entry.getValue());
+            }
+        }
+        Map<ColumnHandle, Domain> enforcedDomains = enforcedDomainsBuilder.buildOrThrow();
+        checkArgument(
+                enforcedDomains.size() + unenforcedDomains.size() == predicateDomains.size(),
+                "Enforced tuple domain cannot be determined. Connector returned an unenforced TupleDomain that contains columns not in predicate.");
+        return TupleDomain.withColumnDomains(enforcedDomains);
     }
 }

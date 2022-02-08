@@ -57,6 +57,7 @@ import io.trino.spi.connector.ConnectorNodePartitioningProvider;
 import io.trino.spi.connector.ConnectorPageSinkProvider;
 import io.trino.spi.connector.ConnectorPageSourceProvider;
 import io.trino.spi.connector.ConnectorSplitManager;
+import io.trino.spi.connector.MetadataProvider;
 import io.trino.spi.connector.TableProcedureMetadata;
 import io.trino.spi.eventlistener.EventListener;
 import io.trino.spi.procedure.Procedure;
@@ -108,6 +109,7 @@ public final class InternalHiveConnectorFactory
                         binder.bind(NodeVersion.class).toInstance(new NodeVersion(context.getNodeManager().getCurrentNode().getVersion()));
                         binder.bind(NodeManager.class).toInstance(context.getNodeManager());
                         binder.bind(VersionEmbedder.class).toInstance(context.getVersionEmbedder());
+                        binder.bind(MetadataProvider.class).toInstance(context.getMetadataProvider());
                         binder.bind(PageIndexerFactory.class).toInstance(context.getPageIndexerFactory());
                         binder.bind(PageSorter.class).toInstance(context.getPageSorter());
                     },
@@ -121,7 +123,6 @@ public final class InternalHiveConnectorFactory
                     .initialize();
 
             LifeCycleManager lifeCycleManager = injector.getInstance(LifeCycleManager.class);
-            TransactionalMetadataFactory metadataFactory = injector.getInstance(TransactionalMetadataFactory.class);
             HiveTransactionManager transactionManager = injector.getInstance(HiveTransactionManager.class);
             ConnectorSplitManager splitManager = injector.getInstance(ConnectorSplitManager.class);
             ConnectorPageSourceProvider connectorPageSource = injector.getInstance(ConnectorPageSourceProvider.class);
@@ -144,7 +145,6 @@ public final class InternalHiveConnectorFactory
 
             return new HiveConnector(
                     lifeCycleManager,
-                    metadataFactory,
                     transactionManager,
                     new ClassLoaderSafeConnectorSplitManager(splitManager, classLoader),
                     new ClassLoaderSafeConnectorPageSourceProvider(connectorPageSource, classLoader),
@@ -159,6 +159,7 @@ public final class InternalHiveConnectorFactory
                     hiveAnalyzeProperties.getAnalyzeProperties(),
                     hiveMaterializedViewPropertiesProvider.getMaterializedViewProperties(),
                     hiveAccessControl,
+                    injector.getInstance(HiveConfig.class).isSingleStatementWritesOnly(),
                     classLoader);
         }
     }
